@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+data/chroma/
+data/bm25/
+data/uploads/
+*.log
+logs/
+.idea/
