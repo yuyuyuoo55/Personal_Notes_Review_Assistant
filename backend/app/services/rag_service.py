@@ -8,17 +8,16 @@ from typing import Literal
 
 from langchain_deepseek import ChatDeepSeek
 from langchain_core.documents import Document
-from sentence_transformers import CrossEncoder
 
 from backend.app.core.config import DEEPSEEK_API_KEY, UPLOAD_DIRECTORY
 from backend.app.schemas.note import SourceChunk
 from backend.app.services.agent_service import FastAgentEvent, stream_fast_agent_answer
-from backend.app.services.bm25_retriever import bm25_retriever
+from backend.app.services.bm25_retriever import bm25_retriever, _HAS_PKUSEG
 from backend.app.services.chat_service import generate_responses_based_on_the_data
 from backend.app.services.note_loader import load_notes
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.query_rewriter import query_rewrite
-from backend.app.services.reranker import cross_encoder_reranker_index
+from backend.app.services.reranker import cross_encoder_reranker_index, _HAS_SENTENCE_TRANSFORMERS
 from backend.app.services.rrf_fusion import rrf_fusion
 from backend.app.services.vector_retriever import vector_retriever
 from backend.app.storage.vector_store import vector_store
@@ -97,11 +96,18 @@ def get_chat_model() -> ChatDeepSeek:
 
 
 @lru_cache
-def get_reranker_model() -> CrossEncoder:
-    """优先加载本机 Cross-Encoder 缓存；缺失时才首次下载。"""
+def get_reranker_model():
+    """优先加载本机 Cross-Encoder 缓存；缺失时才首次下载。
+
+    部署环境未安装 sentence_transformers / torch 时返回 None，精排一步会自动跳过。
+    """
+    if not _HAS_SENTENCE_TRANSFORMERS:
+        return None
     try:
+        from sentence_transformers import CrossEncoder
         return CrossEncoder(RERANKER_MODEL_NAME, local_files_only=True)
     except OSError:
+        from sentence_transformers import CrossEncoder
         return CrossEncoder(RERANKER_MODEL_NAME)
 
 

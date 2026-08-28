@@ -61,6 +61,7 @@ from backend.app.services.rag_service import (  # noqa: E402
     is_reranker_cached,
     prepare_rag_answer,
 )
+from backend.app.services.reranker import _HAS_SENTENCE_TRANSFORMERS  # noqa: E402
 from backend.app.storage.vector_store import knowledge_to_vector, vector_store  # noqa: E402
 
 
@@ -395,22 +396,30 @@ with chat_column:
                 try:
                     with st.status("正在理解问题并检索笔记…", expanded=True) as request_status:
                         # 精确查找首次使用：提示精排模型准备。
+                        # 部署环境若未安装 sentence_transformers / torch，精排会自动跳过，
+                        # 精确模式降级为「查询改写 + 向量/BM25 双路召回 + RRF 融合」，不阻塞。
                         if st.session_state.retrieval_mode == "accurate":
-                            preparing_reranker = True
-                            request_status.update(
-                                label=(
-                                    "正在从本机缓存加载精排模型…"
-                                    if is_reranker_cached()
-                                    else "首次使用：正在准备精排模型…"
-                                ),
-                                state="running",
-                            )
-                            get_reranker_model()
-                            preparing_reranker = False
-                            request_status.update(
-                                label="精排模型已就绪，正在执行完整检索…",
-                                state="running",
-                            )
+                            if _HAS_SENTENCE_TRANSFORMERS:
+                                preparing_reranker = True
+                                request_status.update(
+                                    label=(
+                                        "正在从本机缓存加载精排模型…"
+                                        if is_reranker_cached()
+                                        else "首次使用：正在准备精排模型…"
+                                    ),
+                                    state="running",
+                                )
+                                get_reranker_model()
+                                preparing_reranker = False
+                                request_status.update(
+                                    label="精排模型已就绪，正在执行完整检索…",
+                                    state="running",
+                                )
+                            else:
+                                request_status.update(
+                                    label="精排模型未安装，精确模式将降级为混合检索+RRF 融合…",
+                                    state="running",
+                                )
 
                         preparation = prepare_rag_answer(
                             original_query=question,

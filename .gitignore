@@ -9,3 +9,6 @@ data/uploads/
 *.log
 logs/
 .idea/
+push_out.txt
+push_err.txt
+.streamlit/secrets.toml

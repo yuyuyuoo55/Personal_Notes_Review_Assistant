@@ -1,9 +1,20 @@
-from sentence_transformers import CrossEncoder
+# sentence_transformers 及其底层 torch 在部分部署环境（Streamlit Cloud）安装重、易失败，
+# 因此改为可选：缺省时精排不执行，直接返回 RRF 融合后的结果（精确查找仍可用，只是少了精排一层）。
+try:
+    from sentence_transformers import CrossEncoder
+    _HAS_SENTENCE_TRANSFORMERS = True
+except Exception:
+    CrossEncoder = None
+    _HAS_SENTENCE_TRANSFORMERS = False
 
-def cross_encoder_reranker_index(query:str,
-                                 rrf_results:list[dict],
-                                 cross_encoder:CrossEncoder,# 已经初始化好的模型
-                                 top_k:int=5)->list[dict]:
+
+def cross_encoder_reranker_index(query: str,
+                                 rrf_results: list[dict],
+                                 cross_encoder,
+                                 top_k: int = 5) -> list[dict]:
+    # 0. 精排模型不可用时，直接返回 RRF 结果的前 top_k，保证链路不崩溃。
+    if not _HAS_SENTENCE_TRANSFORMERS or cross_encoder is None:
+        return rrf_results[:top_k]
 
     # 1.将用户问题和对应的片段组成一个列表返回
     pairs= []

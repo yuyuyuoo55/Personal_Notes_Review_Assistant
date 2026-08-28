@@ -1,6 +1,11 @@
-# 个人笔记复习助手 · 云端部署依赖（从 pyproject.toml 提取，供 Streamlit Community Cloud / Hugging Face Spaces 安装）
-# 注意：torch + sentence-transformers 较大，首次冷启动偏慢；精确模式依赖它们。
-# 部署平台用 Streamlit 时，下面这些包会自动由平台按 requirements.txt 安装。
+# 个人笔记复习助手 · 云端部署依赖（Streamlit Community Cloud / Hugging Face Spaces）
+# 说明：
+#   - 以「快速模式（Agent 检索）」为线上主力，保证安装快、冷启动稳定；
+#   - pkuseg 与 sentence-transformers/torch 已从代码改为可选：缺省时精确模式自动
+#     降级为「查询改写 + 向量/BM25 双路召回 + RRF 融合（无精排）」，不阻塞运行。
+#     如需完整精确模式（含精排），可自行加回下面两行（较大、冷启动慢）：
+#         sentence-transformers>=5.2,<6
+#         torch>=2.9,<3
 
 streamlit>=1.60,<1.61
 fastapi>=0.141,<0.142
@@ -19,8 +24,3 @@ langchain-text-splitters>=1.1,<2
 chromadb>=1.5,<2
 dashscope>=1.25,<2
 bm25s>=0.2,<0.3
-pkuseg==0.0.25
-
-# 精排（精确模式）：较大，可在精简部署时移除，届时精确模式会降级
-sentence-transformers>=5.2,<6
-torch>=2.9,<3

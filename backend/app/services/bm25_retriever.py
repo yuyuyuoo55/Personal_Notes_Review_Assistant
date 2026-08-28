@@ -2,8 +2,16 @@ from pathlib import Path
 from typing import Any
 
 import bm25s
-import pkuseg
 from langchain_core.documents import Document
+
+# pkuseg 在部分部署环境（如 Streamlit Cloud 的 Linux/Python 3.12）无法编译安装，
+# 因此改为可选：缺省时 BM25 关键词检索不可用，but 精确查找会自动退回“仅向量融合”，不会崩溃。
+try:
+    import pkuseg
+    _HAS_PKUSEG = True
+except Exception:
+    pkuseg = None
+    _HAS_PKUSEG = False
 
 from backend.app.core.config import BM25_INDEX_PATH
 from backend.app.core.logger import get_logger
@@ -23,7 +31,10 @@ def bm25_retriever(
     # 1. 获取 BM25 索引路径。
     index_file = Path(index_path)
 
-    # 2. 初始化中文切词工具。
+    # 2. 初始化中文切词工具；没有 pkuseg 时直接返回空（精确查找会退回仅向量融合）。
+    if not _HAS_PKUSEG:
+        logger.info("pkuseg 不可用，跳过 BM25 关键词检索（精确查找将退回仅向量融合）")
+        return []
     segmenter = pkuseg.pkuseg()
 
     # 3. 判断本地是否已有索引；有且不要求重建时，直接加载。
