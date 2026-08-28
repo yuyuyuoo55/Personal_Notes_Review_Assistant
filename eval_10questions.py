@@ -158,7 +158,7 @@ def main():
     lines.append("")
     lines.append("## 汇总（仅统计可自动判断的题）")
     lines.append(
-        f"- 快速模式（纯向量 top-2）：{stats['fast'][0]}/{stats['fast'][1]} 命中期望"
+        f"- 快速模式（Agent 按需向量检索 top-3）：{stats['fast'][0]}/{stats['fast'][1]} 命中期望"
     )
     lines.append(
         f"- 精确查找（混合检索+精排）：{stats['acc'][0]}/{stats['acc'][1]} 命中期望"

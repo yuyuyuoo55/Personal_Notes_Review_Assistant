@@ -314,7 +314,7 @@ with chat_column:
             st.rerun()
 
     mode_descriptions = {
-        "fast": "当前链路：Agent 判断 →（直接回答 / 向量检索 Top-2）→ 基于片段回答",
+        "fast": "当前链路：Agent 判断 →（直接回答 / 向量检索 Top-3）→ 基于片段回答",
         "accurate": "当前链路：原问题 → 查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 回答",
     }
     st.markdown(
