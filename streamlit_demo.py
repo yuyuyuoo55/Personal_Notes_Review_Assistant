@@ -328,8 +328,9 @@ with chat_column:
             st.rerun()
 
     mode_descriptions = {
-        "fast": "当前链路：Agent 判断 →（直接回答 / 向量检索 Top-3）→ 基于片段回答",
-        "accurate": "当前链路：原问题 → 查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 回答",
+        "fast": "当前链路：Agent 判断 →（直接回答 / 向量检索 Top-3）→ 基于片段回答　【线上主力 · 稳定】",
+        "accurate": ("当前链路：原问题 → 查询改写 → 向量 + BM25 → RRF → 回答　"
+                     "【云端无精排模型时自动降级：Cross-Encoder 精排一步会跳过】"),
     }
     st.markdown(
         f"<div class='mode-flow'>{mode_descriptions[st.session_state.retrieval_mode]}</div>",
@@ -489,9 +490,9 @@ with focus_column:
         f"""
         <div class="focus-card">
             <strong>当前模式：{mode_now}</strong>
-            <span>{'Agent 会自行判断是否检索；需要资料时只调用向量检索，适合日常复习。'
+            <span>{'Quick · 线上主力：Agent 会自行判断是否检索；需要资料时只调用向量检索，稳定快速。'
                  if st.session_state.get('retrieval_mode', 'fast') == 'fast'
-                 else '固定执行改写、双路召回、RRF 与精排，适合术语和需要准确来源的问题。'}</span>
+                 else 'Accurate · 云端提示：未内置精排模型（torch 等未部署），此模式自动降级为「查询改写 + 向量/BM25 双路召回 + RRF 融合」，Cross-Encoder 精排一步会跳过。'}</span>
         </div>
         """,
         unsafe_allow_html=True,
