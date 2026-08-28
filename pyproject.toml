@@ -1,5 +1,12 @@
+[project]
+name = "personal-notes-review-assistant"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+description = "个人笔记复习助手与清心园：本地笔记检索、带来源问答与小测"
 # 依赖统一由 requirements.txt 管理（适用于 Streamlit Community Cloud / Hugging Face Spaces）。
-# 这里只保留 pytest 配置，避免 Streamlit 走 uv 读 [project] dependencies 时遇到历史 TOML 问题。
+# [project] 表保留的最少字段是为了满足 uv "No project table found" 校验；
+# 这里不写 dependencies，实际安装走 requirements.txt。
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
