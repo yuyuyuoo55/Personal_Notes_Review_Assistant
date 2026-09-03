@@ -4,6 +4,7 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 import json
 import re
+from hashlib import sha256
 from typing import Any, Literal
 
 from langchain.agents import create_agent
@@ -199,36 +200,24 @@ def _build_source_chunks(chunks: list[dict[str, Any]]) -> list[SourceChunk]:
     return sources
 
 
-_fast_agent: Any | None = None
-
-
 def get_fast_agent(chat_model):
-    """整个后端进程只创建一次快速模式 Agent，复用模型与内存检查点。"""
-    global _fast_agent
-
-    if _fast_agent is None:
-        _fast_agent = create_agent(
-            model=chat_model,
-            tools=[search_personal_notes],
-            system_prompt=FAST_AGENT_SYSTEM_PROMPT,
-            middleware=[
-                # 先处理 DeepSeek DSML，再让 Agent 自动走工具循环。
-                DeepSeekToolCallMiddleware(),
-                # 技术问题的一轮通常包含：用户问题、AI 工具调用、工具结果、AI 回答。
-                # 因此使用 14 / 12，确保最近 3 轮技术对话不会被拆开或过早压缩。
-                # 普通闲聊消息更少，会自然保留超过 3 轮，这是可接受的。
-                SummarizationMiddleware(
-                    model=chat_model,
-                    trigger=("messages", 14),
-                    keep=("messages", 12),
-                    trim_tokens_to_summarize=1200,
-                    summary_prompt=MEMORY_SUMMARY_PROMPT,
-                ),
-            ],
-            checkpointer=checkpointer,
-        )
-
-    return _fast_agent
+    """按请求创建 Agent，避免首个用户模型及 Key 被全局单例长期持有。"""
+    return create_agent(
+        model=chat_model,
+        tools=[search_personal_notes],
+        system_prompt=FAST_AGENT_SYSTEM_PROMPT,
+        middleware=[
+            DeepSeekToolCallMiddleware(),
+            SummarizationMiddleware(
+                model=chat_model,
+                trigger=("messages", 14),
+                keep=("messages", 12),
+                trim_tokens_to_summarize=1200,
+                summary_prompt=MEMORY_SUMMARY_PROMPT,
+            ),
+        ],
+        checkpointer=checkpointer,
+    )
 
 
 def _parse_tool_payload(message: ToolMessage) -> dict[str, Any] | None:
@@ -248,15 +237,19 @@ def stream_fast_agent_answer(
     query: str,
     conversation_id: str,
     chat_model,
+    api_key: str,
 ) -> Generator[FastAgentEvent, None, None]:
     """运行 Agent，并同时输出“工具来源事件”和“模型文本 token 事件”。"""
     fast_agent = get_fast_agent(chat_model)
+    # 相同 conversation_id 在不同 BYOK 用户之间也必须隔离；只保存不可逆摘要。
+    key_namespace = sha256(api_key.encode()).hexdigest()[:16]
+    thread_id = f"{key_namespace}:{conversation_id}"
 
     # 6. 明确使用 HumanMessage 表示当前用户问题。
     # 同一个 thread_id 会自动续接此前的原始消息或摘要。
     stream = fast_agent.stream(
         {"messages": [HumanMessage(content=query)]},
-        config={"configurable": {"thread_id": conversation_id}},
+        config={"configurable": {"thread_id": thread_id}},
         stream_mode=["updates", "messages"],
     )
 

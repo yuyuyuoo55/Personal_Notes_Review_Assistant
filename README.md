@@ -12,6 +12,8 @@
 - **资料不足拒答**：检索结果不可靠时提示补充笔记，不使用联网知识强行回答。
 - **本地数据持久化**：原始 Markdown、Chroma 向量索引和 BM25 索引均保存在本机。
 - **流式交互**：FastAPI 通过 SSE 返回检索阶段、来源、回答 token 和耗时。
+- **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
+- **多模态图片理解**：聊天图片由 DeepSeek Vision 直接回答；Markdown 内图片经 OSS 与 VLM 描述后再进入原有 RAG。
 
 > 当前版本是单机 MVP：仅支持 `.md` 文件；章节小测、批量导入、笔记更新/删除和多用户能力尚未实现。
 
@@ -37,6 +39,7 @@ flowchart LR
     EMB --> CHROMA[(Chroma)]
 
     API --> MODE{检索模式}
+    API -->|聊天图片| VISION[DeepSeek Vision 直答]
     MODE -->|快速模式| AGENT[LangChain Agent]
     AGENT -->|按需调用工具| VECTOR[向量检索 Top-3]
 
@@ -49,6 +52,7 @@ flowchart LR
 
     VECTOR --> LLM[DeepSeek 生成]
     RERANK --> LLM
+    VISION --> API
     LLM --> API
 ```
 
@@ -57,8 +61,13 @@ flowchart LR
 ```mermaid
 flowchart LR
     A[上传 Markdown] --> B[格式/空文件/重名校验]
-    B --> C[按 H1/H2/H3 标题切分]
-    C --> D[生成稳定 chunk_id]
+    B --> IMG{包含公网图片或 data URI?}
+    IMG -->|是| OSS[上传部署者 OSS]
+    OSS --> VLM[DeepSeek Vision / 可选 Qwen-VL]
+    VLM --> C[描述回填 Markdown]
+    IMG -->|否| C
+    C --> H[按 H1/H2/H3 标题切分]
+    H --> D[生成稳定 chunk_id]
     D --> E[DashScope Embedding]
     E --> F[写入 Chroma]
     F --> G[下次精确查询时重建 BM25]
@@ -117,14 +126,15 @@ uv run python eval_10questions.py
 - [uv](https://docs.astral.sh/uv/)
 - 可访问 DeepSeek、DashScope 和 Hugging Face
 
-精确模式首次使用会下载 `BAAI/bge-reranker-base`，需要额外等待；后续优先使用本机缓存。
+默认轻量依赖会让精确模式降级为“混合检索 + RRF”。如需 Cross-Encoder 精排，请按 `requirements.txt` 顶部注释安装 `sentence-transformers` 和 `torch`；首次使用会下载 `BAAI/bge-reranker-base`。
 
 ### 2. 克隆并安装依赖
 
 ```powershell
 git clone https://gitee.com/yuyuyuoo55/personal-note-review-assistant.git
 cd personal-note-review-assistant
-uv sync
+uv venv --python 3.12
+uv pip install -r requirements.txt
 ```
 
 ### 3. 配置环境变量
@@ -133,12 +143,25 @@ uv sync
 Copy-Item .env.example .env
 ```
 
-编辑 `.env`，至少填写：
+`.env` 由部署者维护，不填写用户 DeepSeek Key。至少配置 Embedding：
 
 ```dotenv
-DEEPSEEK_API_KEY=YOUR_API_KEY_HERE
 DASHSCOPE_API_KEY=YOUR_API_KEY_HERE
 ```
+
+Markdown 图片处理还需配置 OSS：
+
+```dotenv
+OSS_ACCESS_KEY_ID=YOUR_OSS_ACCESS_KEY_ID_HERE
+OSS_ACCESS_KEY_SECRET=YOUR_OSS_ACCESS_KEY_SECRET_HERE
+OSS_ENDPOINT=https://oss-cn-YOUR_REGION.aliyuncs.com
+OSS_BUCKET_NAME=YOUR_BUCKET_NAME
+OSS_PUBLIC_BASE_URL=
+OSS_URL_EXPIRES_SECONDS=3600
+VLM_FALLBACK_TO_QWEN=false
+```
+
+`OSS_PUBLIC_BASE_URL` 留空时会生成短时签名 URL，适合私有 Bucket。若开启 `VLM_FALLBACK_TO_QWEN=true`，DeepSeek 图片识别失败后会使用部署者的 DashScope Key，相关费用由部署者承担。
 
 不要把真实 Key 写入 README、截图、日志或 Git 提交。
 
@@ -171,10 +194,13 @@ uv run streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 85
 
 ### 5. 使用步骤
 
-1. 在左侧上传一份非空 `.md` 笔记。
-2. 点击“导入到笔记库”，等待切分与向量化完成。
-3. 选择“快速模式”或“精确查找”。
-4. 输入问题，查看回答、来源片段和本次耗时。
+1. 在侧边栏“请输入您的DeepSeek API Key”中填写自己的 Key。
+2. 在左侧上传一份非空 `.md` 笔记。该上传控件始终只接受 Markdown。
+3. 点击“导入到笔记库”，等待图片描述、切分与向量化完成。
+4. 选择“快速模式”或“精确查找”，输入问题查看回答与来源。
+5. 如需直接理解图片，在聊天输入框下方选择图片，再输入“这张图片讲了什么”。图片问答直接使用 DeepSeek Vision，不走 RAG。
+
+用户 Key 只保存在当前 Streamlit `session_state`，并通过 `X-DeepSeek-API-Key` 请求头传给后端；不会写入数据库、配置文件或日志。
 
 同名文件会返回 409；当前版本不支持覆盖导入，请先在本机数据目录中处理旧数据后再导入。
 
@@ -189,7 +215,9 @@ uv run pytest -q
 - `GET /api/health` 健康检查；
 - logger 命名行为。
 
-本仓库当前验证结果为 `2 passed`。它们属于工程烟雾测试，RAG 效果需结合上面的 10 题脚本与人工验收判断。
+本仓库当前验证结果为 `7 passed`。新增测试覆盖缺 Key、图片 SSE 直答、错误降级、Markdown 图片描述回填、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
+
+多模态回归用例位于 `tests/test_multimodal.py`：上传一张测试图片并提问“这张图片讲了什么”，断言 SSE 回答包含“会议时间为周五下午三点”，同时确认没有调用 RAG。
 
 ## 工程结构
 
@@ -223,6 +251,13 @@ Personal_Notes_Review_Assistant/
 | `GET` | `/api/notes` | 查询已导入笔记及片段数 |
 | `POST` | `/api/notes/import` | 上传单个 `.md` 文件，表单字段名为 `file` |
 | `POST` | `/api/chat` | SSE 问答；支持 `fast` / `accurate` 模式 |
+| `POST` | `/api/chat/image` | multipart 图片直答；字段为 `query` 和 `image`，不走 RAG |
+
+`/api/notes/import`、`/api/chat` 和 `/api/chat/image` 都要求请求头：
+
+```http
+X-DeepSeek-API-Key: YOUR_API_KEY_HERE
+```
 
 `POST /api/chat` 请求示例：
 
@@ -237,6 +272,8 @@ Personal_Notes_Review_Assistant/
 ## 已知边界
 
 - 仅支持单个 Markdown 文件导入，不支持 PDF、批量导入、更新和删除。
+- 单个 `.md` 无法携带用户电脑上的本地图片文件；文档图片增强支持公网 HTTPS 图片和 data URI，本地绝对路径会提示后跳过。
+- OSS 或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
 - 快速模式会话记忆保存在进程内，后端重启后清空。
 - 精确模式的 Cross-Encoder 首次加载较慢，且当前没有最低精排分阈值。
 - 自动评测依赖特定测试笔记，固定分数不能直接迁移到其他知识库。
@@ -246,6 +283,8 @@ Personal_Notes_Review_Assistant/
 ## 安全说明
 
 - `.env`、个人笔记、向量索引、BM25 索引和日志默认不提交。
+- 用户 DeepSeek Key 只存在当前页面会话与单次请求内存中，不入库、不写日志、不拼进 Prompt。
+- OSS AccessKey 和部署者 DashScope Key 只由后端 `.env`/Streamlit Secrets 读取，绝不返回前端。
 - 上传前请先移除笔记中的姓名、账号、公司内部信息等隐私内容。
 - 模型问答与向量化会调用外部 API；敏感资料不应直接导入。
 - 项目不联网搜索补充答案，但模型服务本身仍是外部依赖。

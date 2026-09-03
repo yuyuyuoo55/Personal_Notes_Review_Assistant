@@ -9,7 +9,7 @@ from typing import Literal
 from langchain_deepseek import ChatDeepSeek
 from langchain_core.documents import Document
 
-from backend.app.core.config import DEEPSEEK_API_KEY, UPLOAD_DIRECTORY
+from backend.app.core.config import DEEPSEEK_TEXT_MODEL, UPLOAD_DIRECTORY
 from backend.app.schemas.note import SourceChunk
 from backend.app.services.agent_service import FastAgentEvent, stream_fast_agent_answer
 from backend.app.services.bm25_retriever import bm25_retriever, _HAS_PKUSEG
@@ -86,13 +86,11 @@ def no_material_preparation(original_query: str, mode: str) -> RagPreparation:
     )
 
 
-@lru_cache
-def get_chat_model() -> ChatDeepSeek:
-    """创建并缓存 DeepSeek 聊天模型，避免每次提问重复初始化。"""
-    if not DEEPSEEK_API_KEY:
-        raise RuntimeError("未找到 DEEPSEEK_API_KEY，请先在项目根目录 .env 中配置")
-
-    return ChatDeepSeek(model="deepseek-chat", api_key=DEEPSEEK_API_KEY)
+def create_chat_model(api_key: str) -> ChatDeepSeek:
+    """按请求创建模型，避免把任一用户 Key 留在跨请求缓存中。"""
+    if not api_key:
+        raise RuntimeError("请先输入API Key")
+    return ChatDeepSeek(model=DEEPSEEK_TEXT_MODEL, api_key=api_key)
 
 
 @lru_cache
@@ -181,6 +179,7 @@ def prepare_rag_answer(
     original_query: str,
     mode: str = "fast",
     conversation_id: str = "",
+    api_key: str = "",
 ) -> RagPreparation:
     """按模式准备流式 RAG 回答；快速模式由 Agent 自主决定是否检索。"""
     global _bm25_rebuild_required
@@ -190,7 +189,7 @@ def prepare_rag_answer(
 
     # 0. 快速模式：create_agent 负责“直接答 / 调工具 / 根据工具结果再答”。
     if mode == "fast":
-        chat_model = get_chat_model()
+        chat_model = create_chat_model(api_key)
         return RagPreparation(
             rewritten_query=original_query,
             mode=mode,
@@ -200,6 +199,7 @@ def prepare_rag_answer(
                     query=original_query,
                     conversation_id=conversation_id,
                     chat_model=chat_model,
+                    api_key=api_key,
                 )
             ),
         )
@@ -210,7 +210,7 @@ def prepare_rag_answer(
         return no_material_preparation(original_query, mode)
 
     # 2. 查询改写只执行一次，随后两路检索共用改写后的问题。
-    chat_model = get_chat_model()
+    chat_model = create_chat_model(api_key)
     rewritten_query = query_rewrite(original_query, chat_model)
 
     # 3. 双路召回。

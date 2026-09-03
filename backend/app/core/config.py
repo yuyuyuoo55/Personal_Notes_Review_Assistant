@@ -12,7 +12,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_TEXT_MODEL = os.getenv("DEEPSEEK_TEXT_MODEL", "deepseek-v4-flash")
+DEEPSEEK_VISION_MODEL = os.getenv(
+    "DEEPSEEK_VISION_MODEL",
+    "deepseek-v4-flash-vision-exp",
+)
+DEEPSEEK_API_BASE_URL = os.getenv("DEEPSEEK_API_BASE_URL", "https://api.deepseek.com")
+
+# OSS 与文档图片识别均为部署者配置，绝不发送给前端。
+OSS_ACCESS_KEY_ID = os.getenv("OSS_ACCESS_KEY_ID")
+OSS_ACCESS_KEY_SECRET = os.getenv("OSS_ACCESS_KEY_SECRET")
+OSS_ENDPOINT = os.getenv("OSS_ENDPOINT")
+OSS_BUCKET_NAME = os.getenv("OSS_BUCKET_NAME")
+OSS_PUBLIC_BASE_URL = os.getenv("OSS_PUBLIC_BASE_URL")
+OSS_OBJECT_PREFIX = os.getenv("OSS_OBJECT_PREFIX", "personal-notes/images").strip("/")
+OSS_URL_EXPIRES_SECONDS = int(os.getenv("OSS_URL_EXPIRES_SECONDS", "3600"))
+QWEN_VL_MODEL = os.getenv("QWEN_VL_MODEL", "qwen-vl-max")
+VLM_FALLBACK_TO_QWEN = os.getenv("VLM_FALLBACK_TO_QWEN", "false").lower() == "true"
+VLM_TIMEOUT_SECONDS = float(os.getenv("VLM_TIMEOUT_SECONDS", "60"))
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(8 * 1024 * 1024)))
 
 # RAG 组件使用的名称与本地存储位置。
 # 这些只是“配置值”；实际对象由 vector_store.py 和 rag_service.py 创建。

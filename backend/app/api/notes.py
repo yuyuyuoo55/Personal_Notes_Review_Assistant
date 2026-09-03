@@ -2,11 +2,14 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
+from backend.app.core.auth import require_user_deepseek_api_key
 from backend.app.core.config import UPLOAD_DIRECTORY
 from backend.app.schemas.note import ImportResult, NoteSummary
 from backend.app.services.note_loader import load_notes
+from backend.app.services.markdown_image_service import enrich_markdown_images
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.rag_service import invalidate_rag_cache
 from backend.app.storage.vector_store import knowledge_to_vector, vector_store
@@ -23,7 +26,10 @@ router = APIRouter(
     response_model=ImportResult,
     status_code=status.HTTP_201_CREATED,
 )
-async def import_note(file: UploadFile = File(...)) -> ImportResult:
+async def import_note(
+    file: UploadFile = File(...),
+    api_key: str = Depends(require_user_deepseek_api_key),
+) -> ImportResult:
     """接收一个 Markdown 文件，调用既有 RAG 服务完成加载、切分和向量化。"""
     # 2. 读取安全的文件名，并限制当前 MVP 只接收 Markdown。
     file_name = Path(file.filename or "").name
@@ -52,13 +58,22 @@ async def import_note(file: UploadFile = File(...)) -> ImportResult:
             detail="上传文件不能为空",
         )
 
-    file_path.write_bytes(file_content)
-
     try:
+        try:
+            markdown = file_content.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Markdown 文件必须使用 UTF-8 编码",
+            ) from error
+
+        image_result = await enrich_markdown_images(markdown, api_key)
+        await run_in_threadpool(file_path.write_text, image_result.markdown, encoding="utf-8")
+
         # 4. 调用已有 service：加载文档 → 标题切分 → 写入 Chroma。
-        docs = load_notes(str(file_path))
-        chunks = split_documents(docs)
-        success = knowledge_to_vector(chunks)
+        docs = await run_in_threadpool(load_notes, str(file_path))
+        chunks = await run_in_threadpool(split_documents, docs)
+        success = await run_in_threadpool(knowledge_to_vector, chunks)
 
         if not success:
             raise RuntimeError("笔记切分后没有可写入向量库的内容")
@@ -72,14 +87,21 @@ async def import_note(file: UploadFile = File(...)) -> ImportResult:
             chunk_count=len(chunks),
             status="success",
             error_msg=None,
+            image_total=image_result.image_total,
+            image_processed=image_result.image_processed,
+            image_skipped=image_result.image_skipped,
+            warnings=image_result.warnings,
         )
 
+    except HTTPException:
+        file_path.unlink(missing_ok=True)
+        raise
     except Exception as error:
         # 本次导入失败时删除刚保存的文件，避免留下无法使用的上传文件。
         file_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"笔记导入失败：{error}",
+            detail="笔记导入失败，请检查配置后重试",
         ) from error
 
 

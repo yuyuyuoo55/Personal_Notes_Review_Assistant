@@ -30,33 +30,6 @@ def query_rewrite(query: str, llm) -> str:
         return rewritten_query or query
 
     except Exception:
-        logger.exception("查询改写失败，回退原问题")
+        # 不记录第三方 SDK 原始异常，避免认证信息或请求细节进入日志。
+        logger.warning("查询改写失败，已回退原问题")
         return query
-
-if __name__ == "__main__":
-    from langchain_deepseek import ChatDeepSeek
-
-    from backend.app.core.config import DEEPSEEK_API_KEY
-
-    if not DEEPSEEK_API_KEY:
-        raise RuntimeError(
-            "未找到 DEEPSEEK_API_KEY，请先在项目根目录 .env 中配置"
-        )
-
-    llm = ChatDeepSeek(
-        model="deepseek-chat",
-        api_key=DEEPSEEK_API_KEY,
-    )
-
-    test_queries = [
-        "刚才那个融合有什么好处？",
-        "它和加权融合有什么区别？",
-        "RRF 是什么？",
-    ]
-
-    for query in test_queries:
-        rewritten_query = query_rewrite(query, llm)
-
-        print("\n===== 查询改写 =====")
-        print(f"原问题：{query}")
-        print(f"改写后：{rewritten_query}")

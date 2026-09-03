@@ -9,6 +9,12 @@ import httpx
 import streamlit as st
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+DEEPSEEK_API_KEY_HEADER = "X-DeepSeek-API-Key"
+
+if "deepseek_api_key" not in st.session_state:
+    st.session_state.deepseek_api_key = ""
+if "chat_image_uploader_version" not in st.session_state:
+    st.session_state.chat_image_uploader_version = 0
 
 st.set_page_config(page_title="笔记复习助手", page_icon="📚", layout="wide")
 
@@ -186,6 +192,15 @@ if "note_uploader_version" not in st.session_state:
 with st.sidebar:
     st.title("📚 笔记复习助手")
     st.caption("把课堂与技术笔记，变成可追溯的复习资料。")
+    st.text_input(
+        "请输入您的DeepSeek API Key",
+        type="password",
+        key="deepseek_api_key",
+        help="仅保存在当前浏览器会话，并随单次请求发送；不会写入数据库或日志。",
+    )
+    has_api_key = bool(st.session_state.deepseek_api_key.strip())
+    if not has_api_key:
+        st.info("请先输入API Key")
     st.markdown("#### 导入笔记")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
@@ -193,6 +208,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "选择 Markdown 文件",
         type=["md"],
+        disabled=not has_api_key,
         label_visibility="collapsed",
         key=f"note_uploader_{st.session_state.note_uploader_version}",
     )
@@ -206,7 +222,7 @@ with st.sidebar:
     if st.button(
         "导入到笔记库",
         use_container_width=True,
-        disabled=uploaded_file is None or is_duplicate_file,
+        disabled=not has_api_key or uploaded_file is None or is_duplicate_file,
     ):
         try:
             files = {
@@ -219,6 +235,7 @@ with st.sidebar:
             response = httpx.post(
                 f"{API_BASE_URL}/api/notes/import",
                 files=files,
+                headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
                 timeout=120,
             )
             response.raise_for_status()
@@ -226,6 +243,11 @@ with st.sidebar:
             st.session_state.note_import_success = (
                 f"已导入 {result['file_name']} · {result['chunk_count']} 个片段"
             )
+            if result.get("warnings"):
+                st.session_state.note_import_success += (
+                    f"；{result.get('image_processed', 0)} 张图片已识别，"
+                    f"{result.get('image_skipped', 0)} 张已跳过"
+                )
             st.session_state.note_uploader_version += 1
             st.rerun()
         except httpx.HTTPStatusError as error:
@@ -354,10 +376,19 @@ with chat_column:
 
     question = st.chat_input(
         "例如：RRF 和加权融合有什么区别？",
-        disabled=not notes,
+        disabled=not has_api_key,
+    )
+    uploaded_chat_image = st.file_uploader(
+        "可选：上传图片并随问题一起发送（图片问答不走 RAG）",
+        type=["jpg", "jpeg", "png", "gif", "webp"],
+        disabled=not has_api_key,
+        key=f"chat_image_{st.session_state.chat_image_uploader_version}",
     )
 
     if question:
+        if not uploaded_chat_image and not notes:
+            st.warning("请先导入 Markdown 笔记，或在对话区上传一张图片。")
+            st.stop()
         st.session_state.messages.append({"role": "user", "content": question})
 
         with chat_history:
@@ -374,14 +405,39 @@ with chat_column:
                 try:
                     # 请求刚发出就显示状态；模型生成第一个 token 前不会再像页面卡住。
                     with st.status("正在理解问题并检索笔记…", expanded=True) as request_status:
+                        headers = {
+                            DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key
+                        }
+                        if uploaded_chat_image:
+                            endpoint = f"{API_BASE_URL}/api/chat/image"
+                            request_kwargs = {
+                                "data": {"query": question},
+                                "files": {
+                                    "image": (
+                                        uploaded_chat_image.name,
+                                        uploaded_chat_image.getvalue(),
+                                        uploaded_chat_image.type,
+                                    )
+                                },
+                            }
+                            request_status.update(
+                                label="正在使用 DeepSeek Vision 理解图片…",
+                                state="running",
+                            )
+                        else:
+                            endpoint = f"{API_BASE_URL}/api/chat"
+                            request_kwargs = {
+                                "json": {
+                                    "query": question,
+                                    "mode": st.session_state.retrieval_mode,
+                                    "conversation_id": st.session_state.conversation_id,
+                                }
+                            }
                         with httpx.stream(
                             "POST",
-                            f"{API_BASE_URL}/api/chat",
-                            json={
-                                "query": question,
-                                "mode": st.session_state.retrieval_mode,
-                                "conversation_id": st.session_state.conversation_id,
-                            },
+                            endpoint,
+                            headers=headers,
+                            **request_kwargs,
                             timeout=180,
                         ) as response:
                             response.raise_for_status()
@@ -430,6 +486,8 @@ with chat_column:
                             "elapsed_ms": elapsed_ms,
                         }
                     )
+                    if uploaded_chat_image:
+                        st.session_state.chat_image_uploader_version += 1
                     # 本次消息完成后重新运行，所有历史消息会回到滚动区，输入框仍在最下方。
                     st.rerun()
                 except (httpx.HTTPError, RuntimeError):

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal
 
 class ImportResult(BaseModel):
@@ -7,6 +7,10 @@ class ImportResult(BaseModel):
     chunk_count: int # 本次切分后写入的 Chunk 数量；失败时为 0
     status: Literal["success", "failed"] # 	导入最终状态，避免随意传字符串
     error_msg: str | None
+    image_total: int = 0
+    image_processed: int = 0
+    image_skipped: int = 0
+    warnings: list[str] = Field(default_factory=list)
 
 class NoteSummary(BaseModel):
     """笔记列表中展示的一条摘要。"""

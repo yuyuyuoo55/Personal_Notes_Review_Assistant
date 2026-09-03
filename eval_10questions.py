@@ -20,6 +20,7 @@
 """
 
 import json
+import getpass
 import uuid
 import urllib.request
 from datetime import datetime
@@ -73,7 +74,7 @@ def parse_sse(resp):
     }
 
 
-def call_chat(query, mode):
+def call_chat(query, mode, api_key):
     body = json.dumps(
         {
             "query": query,
@@ -82,7 +83,12 @@ def call_chat(query, mode):
         }
     ).encode("utf-8")
     req = urllib.request.Request(
-        API_URL, data=body, headers={"Content-Type": "application/json"}
+        API_URL,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-DeepSeek-API-Key": api_key,
+        },
     )
     with urllib.request.urlopen(req, timeout=180) as resp:
         return parse_sse(resp)
@@ -102,6 +108,10 @@ def judge(expect, result):
 
 
 def main():
+    api_key = getpass.getpass("请输入您的 DeepSeek API Key（输入内容不会显示）：").strip()
+    if not api_key:
+        print("请先输入API Key")
+        return
     print("请确认后端已启动（启动项目.cmd）。开始评测……\n")
     rows = []
     stats = {"fast": [0, 0], "acc": [0, 0]}  # [命中数, 可判断总数]
@@ -113,7 +123,7 @@ def main():
                "fast": None, "acc": None, "fast_judge": "请求失败", "acc_judge": "请求失败"}
         for mode, key in (("fast", "fast"), ("accurate", "acc")):
             try:
-                r = call_chat(q, mode)
+                r = call_chat(q, mode, api_key)
             except Exception as e:
                 print(f"  {mode} 请求失败：{e}")
                 continue

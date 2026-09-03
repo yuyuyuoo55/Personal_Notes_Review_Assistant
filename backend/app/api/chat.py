@@ -4,10 +4,15 @@ import json
 from collections.abc import Generator
 from time import perf_counter
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import StreamingResponse
 
 from backend.app.schemas.chat import ChatRequest
+from backend.app.core.auth import require_user_deepseek_api_key
+from backend.app.services.multimodal_service import (
+    ImageProcessingError,
+    stream_deepseek_image_answer,
+)
 from backend.app.services.rag_service import (
     get_reranker_model,
     is_reranker_cached,
@@ -24,7 +29,10 @@ def sse_event(event_name: str, data: dict) -> str:
 
 
 @router.post("")
-def chat(request: ChatRequest) -> StreamingResponse:
+def chat(
+    request: ChatRequest,
+    api_key: str = Depends(require_user_deepseek_api_key),
+) -> StreamingResponse:
     """保持原有 SSE 协议；快速模式的来源在 Agent 工具执行后发送。"""
 
     def event_stream() -> Generator[str, None, None]:
@@ -57,6 +65,7 @@ def chat(request: ChatRequest) -> StreamingResponse:
                 original_query=request.query,
                 mode=request.mode,
                 conversation_id=request.conversation_id,
+                api_key=api_key,
             )
 
             # 精确查找在开始生成前就已有最终来源；快速模式要等工具节点结束。
@@ -102,16 +111,56 @@ def chat(request: ChatRequest) -> StreamingResponse:
             elapsed_ms = round((perf_counter() - started_at) * 1000)
             yield sse_event("done", {"elapsed_ms": elapsed_ms})
 
-        except Exception:
+        except Exception as error:
             # SSE 已开启后无法改 HTTP 状态码，只返回用户可理解的信息。
-            detail = (
-                "精排模型准备失败，请检查网络后重试。"
-                if preparing_reranker
-                else "本次问答暂时无法完成，请稍后重试。"
-            )
+            error_name = type(error).__name__.lower()
+            if "authentication" in error_name or "permission" in error_name:
+                detail = "API Key无效，请检查后重试。"
+            elif preparing_reranker:
+                detail = "精排模型准备失败，请检查网络后重试。"
+            else:
+                detail = "本次问答暂时无法完成，请稍后重试。"
             yield sse_event("token", {"content": detail})
             elapsed_ms = round((perf_counter() - started_at) * 1000)
             yield sse_event("done", {"elapsed_ms": elapsed_ms})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.post("/image")
+async def chat_with_image(
+    query: str = Form(..., min_length=1, max_length=500),
+    image: UploadFile = File(...),
+    api_key: str = Depends(require_user_deepseek_api_key),
+) -> StreamingResponse:
+    """聊天图片使用用户 DeepSeek Key 直答，不读取笔记库、不走 RAG。"""
+    image_bytes = await image.read()
+    content_type = image.content_type or "application/octet-stream"
+
+    def event_stream() -> Generator[str, None, None]:
+        started_at = perf_counter()
+        yield sse_event(
+            "meta",
+            {"rewritten_query": query, "mode": "vision", "sources": []},
+        )
+        try:
+            for content in stream_deepseek_image_answer(
+                question=query,
+                image_bytes=image_bytes,
+                content_type=content_type,
+                api_key=api_key,
+            ):
+                yield sse_event("token", {"content": content})
+        except ImageProcessingError as error:
+            yield sse_event("token", {"content": str(error)})
+        yield sse_event(
+            "done",
+            {"elapsed_ms": round((perf_counter() - started_at) * 1000)},
+        )
 
     return StreamingResponse(
         event_stream(),

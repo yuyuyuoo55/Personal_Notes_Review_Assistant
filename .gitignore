@@ -7,6 +7,7 @@ uv.lock
 data/chroma/
 data/bm25/
 data/uploads/
+data/image_cache/
 *.log
 logs/
 .idea/

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -34,25 +35,33 @@ if str(PROJECT_ROOT) not in sys.path:
 import streamlit as st  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# 密钥注入：兼容 3 种来源，保证本地(.env 由 config.py 加载)与云端(Streamlit Secrets)
-# 用同一份代码。
-#   config.py 在模块加载时用 os.getenv("DEEPSEEK_API_KEY") 读取，因此我们只需在
-#   import 后端模块之前，把 Streamlit Secrets 里的密钥注入进程环境变量即可。
-#   这样后端 config.py 无需改动，也能在 Streamlit Cloud 正常读到密钥。
+# 部署者密钥注入：仅加载 DashScope/OSS 等后端配置。
+# 用户 DeepSeek Key 必须在页面自行输入，不从 Streamlit Secrets 代填。
 # ---------------------------------------------------------------------------
-if "DEEPSEEK_API_KEY" not in os.environ or "DASHSCOPE_API_KEY" not in os.environ:
-    try:
-        _secrets = st.secrets
-        if _secrets:
-            for _key in ("DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY"):
-                _val = _secrets.get(_key)
-                if _val and not os.environ.get(_key):
-                    os.environ[_key] = str(_val)
-    except Exception:  # st.secrets 在无 Secrets 文件时抛异常，忽略即可（本地用 .env）
-        pass
+try:
+    _secrets = st.secrets
+    if _secrets:
+        for _key in (
+            "DASHSCOPE_API_KEY",
+            "OSS_ACCESS_KEY_ID",
+            "OSS_ACCESS_KEY_SECRET",
+            "OSS_ENDPOINT",
+            "OSS_BUCKET_NAME",
+            "OSS_PUBLIC_BASE_URL",
+        ):
+            _val = _secrets.get(_key)
+            if _val and not os.environ.get(_key):
+                os.environ[_key] = str(_val)
+except Exception:  # st.secrets 在无 Secrets 文件时抛异常，忽略即可（本地用 .env）
+    pass
 
 # 后端模块（复用，不重写）。
 from backend.app.core.config import UPLOAD_DIRECTORY  # noqa: E402
+from backend.app.services.markdown_image_service import enrich_markdown_images  # noqa: E402
+from backend.app.services.multimodal_service import (  # noqa: E402
+    ImageProcessingError,
+    stream_deepseek_image_answer,
+)
 from backend.app.services.note_loader import load_notes  # noqa: E402
 from backend.app.services.note_splitter import split_documents  # noqa: E402
 from backend.app.services.rag_service import (  # noqa: E402
@@ -84,7 +93,7 @@ def list_notes() -> list[dict]:
     return notes
 
 
-def import_note(file_name: str, file_content: bytes) -> dict:
+def import_note(file_name: str, file_content: bytes, api_key: str) -> dict:
     """保存笔记、切分、写入 Chroma，并让 RAG 缓存失效（等价后端 import_note）。"""
     if not file_name.lower().endswith(".md"):
         raise ValueError("当前只支持 .md 格式笔记")
@@ -94,7 +103,12 @@ def import_note(file_name: str, file_content: bytes) -> dict:
         raise ValueError("同名笔记已存在；当前版本不重复导入")
     if not file_content:
         raise ValueError("上传文件不能为空")
-    file_path.write_bytes(file_content)
+    try:
+        markdown = file_content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("Markdown 文件必须使用 UTF-8 编码") from error
+    image_result = asyncio.run(enrich_markdown_images(markdown, api_key))
+    file_path.write_text(image_result.markdown, encoding="utf-8")
 
     docs = load_notes(str(file_path))
     chunks = split_documents(docs)
@@ -102,7 +116,12 @@ def import_note(file_name: str, file_content: bytes) -> dict:
         file_path.unlink(missing_ok=True)
         raise RuntimeError("笔记切分后没有可写入向量库的内容")
     invalidate_rag_cache()
-    return {"file_name": file_name, "chunk_count": len(chunks)}
+    return {
+        "file_name": file_name,
+        "chunk_count": len(chunks),
+        "image_processed": image_result.image_processed,
+        "image_skipped": image_result.image_skipped,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -221,10 +240,23 @@ existing_note_names = {note["file_name"] for note in notes}
 
 if "note_uploader_version" not in st.session_state:
     st.session_state.note_uploader_version = 0
+if "deepseek_api_key" not in st.session_state:
+    st.session_state.deepseek_api_key = ""
+if "chat_image_uploader_version" not in st.session_state:
+    st.session_state.chat_image_uploader_version = 0
 
 with st.sidebar:
     st.title("📚 笔记复习助手")
     st.caption("把课堂与技术笔记，变成可追溯的复习资料。")
+    st.text_input(
+        "请输入您的DeepSeek API Key",
+        type="password",
+        key="deepseek_api_key",
+        help="仅保存在当前浏览器会话；不会写入数据库、日志或项目文件。",
+    )
+    has_api_key = bool(st.session_state.deepseek_api_key.strip())
+    if not has_api_key:
+        st.info("请先输入API Key")
     st.markdown("#### 导入笔记")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
@@ -232,6 +264,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "选择 Markdown 文件",
         type=["md"],
+        disabled=not has_api_key,
         label_visibility="collapsed",
         key=f"note_uploader_{st.session_state.note_uploader_version}",
     )
@@ -243,12 +276,21 @@ with st.sidebar:
     if st.button(
         "导入到笔记库",
         use_container_width=True,
-        disabled=uploaded_file is None or is_duplicate_file,
+        disabled=not has_api_key or uploaded_file is None or is_duplicate_file,
     ):
         try:
-            result = import_note(uploaded_file.name, uploaded_file.getvalue())
+            result = import_note(
+                uploaded_file.name,
+                uploaded_file.getvalue(),
+                st.session_state.deepseek_api_key,
+            )
+            image_note = ""
+            if result["image_processed"]:
+                image_note = f" · 已识别 {result['image_processed']} 张图片"
+            elif result["image_skipped"]:
+                image_note = f" · {result['image_skipped']} 张图片未识别，已跳过"
             st.session_state.note_import_success = (
-                f"已导入 {result['file_name']} · {result['chunk_count']} 个片段"
+                f"已导入 {result['file_name']} · {result['chunk_count']} 个片段{image_note}"
             )
             st.session_state.note_uploader_version += 1
             st.rerun()
@@ -376,9 +418,21 @@ with chat_column:
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
 
-    question = st.chat_input("例如：RRF 和加权融合有什么区别？", disabled=not notes)
+    question = st.chat_input(
+        "例如：RRF 和加权融合有什么区别？",
+        disabled=not has_api_key,
+    )
+    uploaded_chat_image = st.file_uploader(
+        "可选：上传图片并随问题一起发送（图片问答不走 RAG）",
+        type=["jpg", "jpeg", "png", "gif", "webp"],
+        disabled=not has_api_key,
+        key=f"chat_image_{st.session_state.chat_image_uploader_version}",
+    )
 
     if question:
+        if not uploaded_chat_image and not notes:
+            st.warning("请先导入 Markdown 笔记，或在对话区上传一张图片。")
+            st.stop()
         st.session_state.messages.append({"role": "user", "content": question})
 
         with chat_history:
@@ -422,21 +476,37 @@ with chat_column:
                                     state="running",
                                 )
 
-                        preparation = prepare_rag_answer(
-                            original_query=question,
-                            mode=st.session_state.retrieval_mode,
-                            conversation_id=st.session_state.conversation_id,
-                        )
+                        if uploaded_chat_image:
+                            preparation = None
+                            request_status.update(
+                                label="正在使用 DeepSeek Vision 理解图片…",
+                                state="running",
+                            )
+                            for content in stream_deepseek_image_answer(
+                                question=question,
+                                image_bytes=uploaded_chat_image.getvalue(),
+                                content_type=uploaded_chat_image.type,
+                                api_key=st.session_state.deepseek_api_key,
+                            ):
+                                answer += content
+                                answer_placeholder.markdown(f"{answer}▌")
+                        else:
+                            preparation = prepare_rag_answer(
+                                original_query=question,
+                                mode=st.session_state.retrieval_mode,
+                                conversation_id=st.session_state.conversation_id,
+                                api_key=st.session_state.deepseek_api_key,
+                            )
 
                         # 精确查找在生成前已有最终来源；快速模式在工具节点后才有来源。
-                        if preparation.sources:
+                        if preparation is not None and preparation.sources:
                             sources = preparation.sources
                             request_status.update(
                                 label="已找到相关资料，正在生成回答…",
                                 state="running",
                             )
 
-                        for stream_event in preparation.answer_stream:
+                        for stream_event in preparation.answer_stream if preparation is not None else []:
                             if stream_event.event == "sources":
                                 sources = stream_event.sources or []
                                 request_status.update(
@@ -448,6 +518,9 @@ with chat_column:
                                 answer_placeholder.markdown(f"{answer}▌")
 
                     request_status.update(label="回答完成", state="complete", expanded=False)
+                except ImageProcessingError as error:
+                    answer = str(error)
+                    answer_placeholder.warning(answer)
                 except Exception:
                     preparing_reranker = False
                     detail = (
@@ -473,6 +546,8 @@ with chat_column:
                             st.divider()
                 if answer and not answer.startswith("本次问答"):
                     st.caption(f"本次回答耗时：{elapsed_ms / 1000:.2f} 秒")
+                if uploaded_chat_image:
+                    st.session_state.chat_image_uploader_version += 1
                     st.session_state.messages.append(
                         {
                             "role": "assistant",

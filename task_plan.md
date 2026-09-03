@@ -21,3 +21,32 @@
 - [x] 精确查找：查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 回答。
 - [x] 前端模式选择、后端 DTO 传递和资料不足兜底。
 - [ ] 用真实笔记完成两种模式的端到端验收与耗时记录。
+
+# 阶段 7：BYOK 与多模态图片理解（2026-09-03）
+
+## 目标
+
+实现用户自带 DeepSeek Key、聊天图片直答、Markdown 图片 OSS/VLM 描述回填，并保持现有 Markdown 上传入口、SSE 风格和安全边界。
+
+## 实施阶段
+
+- [x] 7.1 梳理当前部署分支、请求链路、配置与测试结构。
+- [x] 7.2 设计 BYOK 请求头、聊天图片 DTO/API 与 Markdown 图片处理边界。
+- [x] 7.3 实现后端 BYOK、多模态直答、OSS 上传与 VLM 降级。
+- [x] 7.4 实现 Streamlit Key 门禁和聊天区图片上传。
+- [x] 7.5 增加回归测试、配置模板和 README。
+- [x] 7.6 执行安全扫描、测试和本地界面验证。
+
+## 安全约束
+
+- 用户 Key 只存在 Streamlit `session_state` 和单次请求头中，不记录日志、不入库、不写文件、不拼入模型消息。
+- OSS AccessKey 仅从后端 `.env` 读取，绝不下发前端。
+- 错误信息不得回显 Key、Authorization 请求头或 OSS 凭据。
+- Markdown 上传控件仍只允许 `.md`；聊天图片控件独立放在对话区。
+
+## 阶段 7 遇到的错误
+
+| 错误 | 尝试 | 处理 |
+| --- | --- | --- |
+| 测试结果回传被权限审查连接中断 | 1 | 改用项目现有 `.venv` 直接执行 pytest，不访问用户级 uv 缓存 |
+| `.venv` 未包含 pip 模块，无法执行 `python -m pip check` | 1 | 依赖已通过 `uv pip install -r requirements.txt` 安装；改用实际导入、编译和测试验证 |
