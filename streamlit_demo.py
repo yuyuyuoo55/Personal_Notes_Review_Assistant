@@ -146,6 +146,15 @@ st.markdown(
     [data-testid="stHeader"] { background: transparent; }
     [data-testid="stSidebar"] { background: #eef2ed; border-right: 1px solid #d9e2da; }
     [data-testid="stSidebar"] > div:first-child { padding-top: 2.6rem; }
+    /* 暗黑主题下侧边栏为浅色底，强制标题/说明文字用深色，避免看不清 */
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] label p,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: var(--ink) !important;
+    }
     [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, h1, h2, h3 {
         color: var(--ink); letter-spacing: -0.035em;
     }
@@ -252,11 +261,12 @@ with st.sidebar:
         "请输入您的DeepSeek API Key",
         type="password",
         key="deepseek_api_key",
-        help="仅保存在当前浏览器会话；不会写入数据库、日志或项目文件。",
+        placeholder="sk-...",
+        help="用于问答的 DeepSeek API Key（在 platform.deepseek.com 申请）。仅保存在当前浏览器会话，不会写入数据库、日志或项目文件。",
     )
     has_api_key = bool(st.session_state.deepseek_api_key.strip())
     if not has_api_key:
-        st.info("请先输入API Key")
+        st.info("请先输入您的 DeepSeek API Key，再进行提问或导入笔记。")
     st.markdown("#### 导入笔记")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
