@@ -62,9 +62,14 @@ from backend.app.services.multimodal_service import (  # noqa: E402
     ImageProcessingError,
     describe_image_url,
     image_data_url,
-    validate_deepseek_api_key,
     validate_image,
 )
+# validate_deepseek_api_key 用于"验证 Key"按钮；若云端该版本暂缺此函数，
+# 降级为"验证 Key"按钮不可用，但 app 本体仍能正常启动和展示，不整体崩溃。
+try:
+    from backend.app.services.multimodal_service import validate_deepseek_api_key  # noqa: E402
+except ImportError:  # pragma: no cover
+    validate_deepseek_api_key = None
 from backend.app.services.image_chunk_store import save_image_chunks  # noqa: E402
 from backend.app.services.note_loader import load_notes  # noqa: E402
 from backend.app.services.note_splitter import split_documents  # noqa: E402
@@ -278,13 +283,16 @@ with st.sidebar:
         help="用于问答的 DeepSeek API Key（在 platform.deepseek.com 申请）。仅保存在当前浏览器会话，不会写入数据库、日志或项目文件。",
     )
     if st.button("验证 Key", use_container_width=True):
-        try:
-            asyncio.run(validate_deepseek_api_key(st.session_state.deepseek_api_key.strip()))
-            st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
-            st.success("您的 DeepSeek API Key 有效，可以使用")
-        except ImageProcessingError as error:
-            st.session_state.validated_api_key = ""
-            st.error(str(error))
+        if validate_deepseek_api_key is None:
+            st.error("当前环境缺少 Key 验证组件，请先部署最新代码后重试。")
+        else:
+            try:
+                asyncio.run(validate_deepseek_api_key(st.session_state.deepseek_api_key.strip()))
+                st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
+                st.success("您的 DeepSeek API Key 有效，可以使用")
+            except ImageProcessingError as error:
+                st.session_state.validated_api_key = ""
+                st.error(str(error))
     has_api_key = bool(st.session_state.deepseek_api_key.strip()) and (
         st.session_state.validated_api_key == st.session_state.deepseek_api_key.strip()
     )
