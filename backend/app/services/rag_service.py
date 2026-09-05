@@ -15,6 +15,7 @@ from backend.app.services.agent_service import FastAgentEvent, stream_fast_agent
 from backend.app.services.bm25_retriever import bm25_retriever, _HAS_PKUSEG
 from backend.app.services.chat_service import generate_responses_based_on_the_data
 from backend.app.services.note_loader import load_notes
+from backend.app.services.image_chunk_store import load_image_chunks
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.query_rewriter import query_rewrite
 from backend.app.services.reranker import cross_encoder_reranker_index, _HAS_SENTENCE_TRANSFORMERS
@@ -143,6 +144,7 @@ def load_all_chunks() -> tuple[Document, ...]:
     for file_path in UPLOAD_DIRECTORY.glob("*.md"):
         docs = load_notes(str(file_path))
         all_chunks.extend(split_documents(docs))
+        all_chunks.extend(load_image_chunks(file_path))
     return tuple(all_chunks)
 
 
@@ -170,6 +172,7 @@ def build_source_chunks(reranked_results: list[dict]) -> list[SourceChunk]:
                 header_path=header_path,
                 chunk_id=str(result.get("id", "unknown")),
                 content_preview=str(result.get("content", ""))[:200],
+                image_path=metadata.get("image_path"),
             )
         )
     return sources

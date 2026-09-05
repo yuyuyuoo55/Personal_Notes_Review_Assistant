@@ -10,6 +10,7 @@ from backend.app.core.config import UPLOAD_DIRECTORY
 from backend.app.schemas.note import ImportResult, NoteSummary
 from backend.app.services.note_loader import load_notes
 from backend.app.services.markdown_image_service import enrich_markdown_images
+from backend.app.services.image_chunk_store import manifest_path, save_image_chunks
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.rag_service import invalidate_rag_cache
 from backend.app.storage.vector_store import knowledge_to_vector, vector_store
@@ -67,12 +68,19 @@ async def import_note(
                 detail="Markdown 文件必须使用 UTF-8 编码",
             ) from error
 
-        image_result = await enrich_markdown_images(markdown, api_key)
+        image_result = await enrich_markdown_images(
+            markdown,
+            api_key,
+            source_path=str(file_path),
+            doc_dir=UPLOAD_DIRECTORY / file_path.stem,
+        )
         await run_in_threadpool(file_path.write_text, image_result.markdown, encoding="utf-8")
 
         # 4. 调用已有 service：加载文档 → 标题切分 → 写入 Chroma。
         docs = await run_in_threadpool(load_notes, str(file_path))
         chunks = await run_in_threadpool(split_documents, docs)
+        chunks.extend(image_result.image_chunks)
+        await run_in_threadpool(save_image_chunks, file_path, image_result.image_chunks)
         success = await run_in_threadpool(knowledge_to_vector, chunks)
 
         if not success:
@@ -95,10 +103,12 @@ async def import_note(
 
     except HTTPException:
         file_path.unlink(missing_ok=True)
+        manifest_path(file_path).unlink(missing_ok=True)
         raise
     except Exception as error:
         # 本次导入失败时删除刚保存的文件，避免留下无法使用的上传文件。
         file_path.unlink(missing_ok=True)
+        manifest_path(file_path).unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="笔记导入失败，请检查配置后重试",

@@ -13,6 +13,8 @@ DEEPSEEK_API_KEY_HEADER = "X-DeepSeek-API-Key"
 
 if "deepseek_api_key" not in st.session_state:
     st.session_state.deepseek_api_key = ""
+if "validated_api_key" not in st.session_state:
+    st.session_state.validated_api_key = ""
 if "chat_image_uploader_version" not in st.session_state:
     st.session_state.chat_image_uploader_version = 0
 
@@ -178,6 +180,8 @@ def render_sources(sources: list[dict]) -> None:
                 unsafe_allow_html=True,
             )
             st.write(source["content_preview"])
+            if source.get("image_path"):
+                st.image(source["image_path"])
             st.divider()
 
 
@@ -198,9 +202,29 @@ with st.sidebar:
         key="deepseek_api_key",
         help="仅保存在当前浏览器会话，并随单次请求发送；不会写入数据库或日志。",
     )
-    has_api_key = bool(st.session_state.deepseek_api_key.strip())
+    if st.button("验证 Key", use_container_width=True):
+        try:
+            response = httpx.post(
+                f"{API_BASE_URL}/api/key/validate",
+                headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key.strip()},
+                timeout=30,
+            )
+            response.raise_for_status()
+            result = response.json()
+            if result.get("valid"):
+                st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
+                st.success(result["message"])
+            else:
+                st.session_state.validated_api_key = ""
+                st.error(result["message"])
+        except (httpx.HTTPError, ValueError):
+            st.session_state.validated_api_key = ""
+            st.error("无法连接 DeepSeek，请稍后重试")
+    has_api_key = bool(st.session_state.deepseek_api_key.strip()) and (
+        st.session_state.validated_api_key == st.session_state.deepseek_api_key.strip()
+    )
     if not has_api_key:
-        st.info("请先输入API Key")
+        st.info("请输入并验证 API Key")
     st.markdown("#### 导入笔记")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
@@ -379,7 +403,7 @@ with chat_column:
         disabled=not has_api_key,
     )
     uploaded_chat_image = st.file_uploader(
-        "可选：上传图片并随问题一起发送（图片问答不走 RAG）",
+        "可选：上传图片，图片描述会随问题一起参与 RAG 检索",
         type=["jpg", "jpeg", "png", "gif", "webp"],
         disabled=not has_api_key,
         key=f"chat_image_{st.session_state.chat_image_uploader_version}",
@@ -411,7 +435,11 @@ with chat_column:
                         if uploaded_chat_image:
                             endpoint = f"{API_BASE_URL}/api/chat/image"
                             request_kwargs = {
-                                "data": {"query": question},
+                                "data": {
+                                    "query": question,
+                                    "mode": st.session_state.retrieval_mode,
+                                    "conversation_id": st.session_state.conversation_id,
+                                },
                                 "files": {
                                     "image": (
                                         uploaded_chat_image.name,

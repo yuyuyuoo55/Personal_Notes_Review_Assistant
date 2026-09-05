@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.notes import router as notes_router
 from backend.app.api.chat import router as chat_router
+from backend.app.api.key_validate import router as key_router
 
 app = FastAPI(
     title="个人笔记复习助手 API",
@@ -23,6 +24,7 @@ app.add_middleware(
 # 将 notes.py 中的 APIRouter 注册到应用；相当于让 Spring Boot 挂载 Controller。
 app.include_router(notes_router)
 app.include_router(chat_router)
+app.include_router(key_router)
 
 
 @app.get("/api/health", tags=["system"])

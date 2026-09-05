@@ -14,3 +14,7 @@ logs/
 push_out.txt
 push_err.txt
 .streamlit/secrets.toml
+.planning/
+.pytest_tmp/
+.tmp_verify/
+_verify_mm.py

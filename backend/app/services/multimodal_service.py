@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 from mimetypes import guess_extension
+from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -67,6 +68,42 @@ def validate_image(image_bytes: bytes, content_type: str | None) -> str:
 def image_data_url(image_bytes: bytes, content_type: str) -> str:
     encoded = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{content_type};base64,{encoded}"
+
+
+def save_image_to_local(image_bytes: bytes, content_type: str, doc_dir: str | Path) -> str:
+    """Validate and save an imported image below the note's local image directory."""
+    mime = validate_image(image_bytes, content_type)
+    target_dir = Path(doc_dir) / "images"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    extension = guess_extension(mime) or ".bin"
+    target_path = target_dir / f"{uuid4().hex}{extension}"
+    target_path.write_bytes(image_bytes)
+    return str(target_path.resolve())
+
+
+def image_path_to_data_url(image_path: str | Path) -> str:
+    path = Path(image_path)
+    content_type = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}.get(path.suffix.lower())
+    if content_type is None:
+        raise ImageProcessingError("图片格式不支持，已跳过")
+    image_bytes = path.read_bytes()
+    mime = validate_image(image_bytes, content_type)
+    return image_data_url(image_bytes, mime)
+
+
+async def validate_deepseek_api_key(api_key: str) -> None:
+    """Validate a BYOK key without persisting or logging it."""
+    url = f"{DEEPSEEK_API_BASE_URL.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=VLM_TIMEOUT_SECONDS, trust_env=False) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        if response.status_code in {401, 403}:
+            raise InvalidApiKeyError("API Key 无效，请检查后重试")
+        response.raise_for_status()
+    except InvalidApiKeyError:
+        raise
+    except (httpx.TimeoutException, httpx.HTTPError) as error:
+        raise ImageProcessingError("无法连接 DeepSeek，请稍后重试") from error
 
 
 def _deepseek_payload(question: str, image_url: str, *, stream: bool) -> dict:

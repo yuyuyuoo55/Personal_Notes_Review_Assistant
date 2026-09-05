@@ -7,9 +7,12 @@ import ipaddress
 import re
 import socket
 from dataclasses import dataclass, field
+from hashlib import sha256
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from langchain_core.documents import Document
 
 from backend.app.core.config import MAX_IMAGE_BYTES, VLM_TIMEOUT_SECONDS
 from backend.app.services.multimodal_service import (
@@ -17,7 +20,8 @@ from backend.app.services.multimodal_service import (
     ImageProcessingError,
     InvalidApiKeyError,
     describe_image_url,
-    upload_image_to_oss,
+    image_path_to_data_url,
+    save_image_to_local,
     validate_image,
 )
 
@@ -33,6 +37,7 @@ class MarkdownImageResult:
     image_processed: int = 0
     image_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+    image_chunks: list[Document] = field(default_factory=list)
 
 
 def _assert_public_https_url(source: str) -> str:
@@ -99,7 +104,25 @@ def _decode_data_uri(source: str) -> tuple[bytes, str]:
     return image_bytes, mime
 
 
-async def enrich_markdown_images(markdown: str, api_key: str) -> MarkdownImageResult:
+def _headers_before(markdown: str, position: int) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for line in markdown[:position].splitlines():
+        match = re.match(r"^(#{1,3})\s+(.+?)\s*$", line)
+        if match:
+            level = len(match.group(1))
+            headers[f"Header {level}"] = match.group(2)
+            for deeper in range(level + 1, 4):
+                headers.pop(f"Header {deeper}", None)
+    return headers
+
+
+async def enrich_markdown_images(
+    markdown: str,
+    api_key: str,
+    *,
+    source_path: str = "",
+    doc_dir: str | Path | None = None,
+) -> MarkdownImageResult:
     """逐图增强 Markdown；单图失败只记录安全 warning，不中断文档。"""
     matches = list(MARKDOWN_IMAGE_PATTERN.finditer(markdown))
     result = MarkdownImageResult(markdown=markdown, image_total=len(matches))
@@ -109,6 +132,7 @@ async def enrich_markdown_images(markdown: str, api_key: str) -> MarkdownImageRe
     replacements: list[tuple[int, int, str]] = []
     for index, match in enumerate(matches, start=1):
         source = match.group("source").strip("<>")
+        local_path: str | None = None
         try:
             if source.lower().startswith("data:image/"):
                 image_bytes, mime = _decode_data_uri(source)
@@ -117,18 +141,37 @@ async def enrich_markdown_images(markdown: str, api_key: str) -> MarkdownImageRe
             else:
                 raise ImageProcessingError("本地图片未随 Markdown 上传，已跳过")
 
-            public_url = await asyncio.to_thread(upload_image_to_oss, image_bytes, mime)
-            description = await describe_image_url(public_url, api_key)
+            local_path = await asyncio.to_thread(
+                save_image_to_local,
+                image_bytes,
+                mime,
+                doc_dir or Path(source_path).parent,
+            )
+            description = await describe_image_url(image_path_to_data_url(local_path), api_key)
             replacement = f"{match.group(0)}\n\n> 图片内容：{description}"
             replacements.append((match.start(), match.end(), replacement))
+            metadata = {
+                "source": source_path,
+                "image_path": local_path,
+                "is_image_chunk": True,
+            }
+            metadata.update(_headers_before(markdown, match.start()))
+            metadata["chunk_id"] = sha256(
+                f"{source_path}:{local_path}:{description}".encode("utf-8")
+            ).hexdigest()[:16]
+            result.image_chunks.append(Document(page_content=description, metadata=metadata))
             result.image_processed += 1
         except InvalidApiKeyError as error:
+            if local_path:
+                Path(local_path).unlink(missing_ok=True)
             # 用户 Key 无效：后续 RAG 问答同样依赖该 Key，继续导入没有意义，
             # 且该错误不允许回退到部署者付费模型。直接中止整个导入，明确提示用户。
             raise InvalidApiKeyError(
                 "DeepSeek API Key 无效，笔记导入已中止。请检查 API Key 后重试。"
             ) from error
         except ImageProcessingError as error:
+            if local_path:
+                Path(local_path).unlink(missing_ok=True)
             result.image_skipped += 1
             result.warnings.append(f"第 {index} 张图片：{error}")
 

@@ -10,7 +10,11 @@ def generate_responses_based_on_the_data(
 
     if reranked_results:
         for result in reranked_results:
-            data_chunk.append(result["content"])
+            content = result["content"]
+            image_path = result.get("metadata", {}).get("image_path")
+            if image_path:
+                content = f"[图片资料：{image_path}]\n{content}"
+            data_chunk.append(content)
 
     # 2. 将多个片段拼成一段上下文资料
     if not data_chunk:
@@ -38,6 +42,7 @@ def generate_responses_based_on_the_data(
     此时不要先输出一长段局部答案，再在结尾补“资料不足”。
     3. 资料覆盖核心答案时，直接回答问题；回答要清晰，优先解释核心概念，默认控制在 3 到 5 个要点内。
     4. 不要提及“提示词”“上下文”“模型”等内部信息。
+    5. 若参考资料含图片，可在回答中说明图片内容。
 
     【用户问题】
     {query}

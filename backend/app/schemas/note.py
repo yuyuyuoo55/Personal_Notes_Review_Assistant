@@ -24,6 +24,7 @@ class SourceChunk(BaseModel):
     header_path: list[str] # 标题层级，例如 ["项目开发计划", "目标"]
     chunk_id: str # 命中的稳定片段标识，用于追溯
     content_preview: str # 在前端来源卡片中展示的原文预览
+    image_path: str | None = None
 
 # if __name__ == "__main__":
 #     import_result = ImportResult(

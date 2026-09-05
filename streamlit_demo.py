@@ -60,8 +60,12 @@ from backend.app.core.config import UPLOAD_DIRECTORY  # noqa: E402
 from backend.app.services.markdown_image_service import enrich_markdown_images  # noqa: E402
 from backend.app.services.multimodal_service import (  # noqa: E402
     ImageProcessingError,
-    stream_deepseek_image_answer,
+    describe_image_url,
+    image_data_url,
+    validate_deepseek_api_key,
+    validate_image,
 )
+from backend.app.services.image_chunk_store import save_image_chunks  # noqa: E402
 from backend.app.services.note_loader import load_notes  # noqa: E402
 from backend.app.services.note_splitter import split_documents  # noqa: E402
 from backend.app.services.rag_service import (  # noqa: E402
@@ -107,11 +111,18 @@ def import_note(file_name: str, file_content: bytes, api_key: str) -> dict:
         markdown = file_content.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ValueError("Markdown 文件必须使用 UTF-8 编码") from error
-    image_result = asyncio.run(enrich_markdown_images(markdown, api_key))
+    image_result = asyncio.run(enrich_markdown_images(
+        markdown,
+        api_key,
+        source_path=str(file_path),
+        doc_dir=UPLOAD_DIRECTORY / file_path.stem,
+    ))
     file_path.write_text(image_result.markdown, encoding="utf-8")
 
     docs = load_notes(str(file_path))
     chunks = split_documents(docs)
+    chunks.extend(image_result.image_chunks)
+    save_image_chunks(file_path, image_result.image_chunks)
     if not knowledge_to_vector(chunks):
         file_path.unlink(missing_ok=True)
         raise RuntimeError("笔记切分后没有可写入向量库的内容")
@@ -251,6 +262,8 @@ if "note_uploader_version" not in st.session_state:
     st.session_state.note_uploader_version = 0
 if "deepseek_api_key" not in st.session_state:
     st.session_state.deepseek_api_key = ""
+if "validated_api_key" not in st.session_state:
+    st.session_state.validated_api_key = ""
 if "chat_image_uploader_version" not in st.session_state:
     st.session_state.chat_image_uploader_version = 0
 
@@ -264,7 +277,17 @@ with st.sidebar:
         placeholder="sk-...",
         help="用于问答的 DeepSeek API Key（在 platform.deepseek.com 申请）。仅保存在当前浏览器会话，不会写入数据库、日志或项目文件。",
     )
-    has_api_key = bool(st.session_state.deepseek_api_key.strip())
+    if st.button("验证 Key", use_container_width=True):
+        try:
+            asyncio.run(validate_deepseek_api_key(st.session_state.deepseek_api_key.strip()))
+            st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
+            st.success("您的 DeepSeek API Key 有效，可以使用")
+        except ImageProcessingError as error:
+            st.session_state.validated_api_key = ""
+            st.error(str(error))
+    has_api_key = bool(st.session_state.deepseek_api_key.strip()) and (
+        st.session_state.validated_api_key == st.session_state.deepseek_api_key.strip()
+    )
     if not has_api_key:
         st.info("请先输入您的 DeepSeek API Key，再进行提问或导入笔记。")
     st.markdown("#### 导入笔记")
@@ -424,6 +447,8 @@ with chat_column:
                                     unsafe_allow_html=True,
                                 )
                                 st.write(source["content_preview"])
+                                if source.get("image_path"):
+                                    st.image(source["image_path"])
                                 st.divider()
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
@@ -433,7 +458,7 @@ with chat_column:
         disabled=not has_api_key,
     )
     uploaded_chat_image = st.file_uploader(
-        "可选：上传图片并随问题一起发送（图片问答不走 RAG）",
+        "可选：上传图片，图片描述会随问题一起参与 RAG 检索",
         type=["jpg", "jpeg", "png", "gif", "webp"],
         disabled=not has_api_key,
         key=f"chat_image_{st.session_state.chat_image_uploader_version}",
@@ -487,19 +512,23 @@ with chat_column:
                                 )
 
                         if uploaded_chat_image:
-                            preparation = None
                             request_status.update(
                                 label="正在使用 DeepSeek Vision 理解图片…",
                                 state="running",
                             )
-                            for content in stream_deepseek_image_answer(
-                                question=question,
-                                image_bytes=uploaded_chat_image.getvalue(),
-                                content_type=uploaded_chat_image.type,
+                            image_bytes = uploaded_chat_image.getvalue()
+                            mime = validate_image(image_bytes, uploaded_chat_image.type)
+                            description = asyncio.run(describe_image_url(
+                                image_data_url(image_bytes, mime),
+                                st.session_state.deepseek_api_key,
+                            ))
+                            rag_query = f"图片内容：{description}\n\n用户问题：{question}"
+                            preparation = prepare_rag_answer(
+                                original_query=rag_query,
+                                mode=st.session_state.retrieval_mode,
+                                conversation_id=st.session_state.conversation_id,
                                 api_key=st.session_state.deepseek_api_key,
-                            ):
-                                answer += content
-                                answer_placeholder.markdown(f"{answer}▌")
+                            )
                         else:
                             preparation = prepare_rag_answer(
                                 original_query=question,
@@ -553,6 +582,8 @@ with chat_column:
                                 unsafe_allow_html=True,
                             )
                             st.write(source["content_preview"])
+                            if source.get("image_path"):
+                                st.image(source["image_path"])
                             st.divider()
                 if answer and not answer.startswith("本次问答"):
                     st.caption(f"本次回答耗时：{elapsed_ms / 1000:.2f} 秒")

@@ -54,6 +54,7 @@ FAST_AGENT_SYSTEM_PROMPT = """
 4. 工具返回 found 为 true 时，只能依据返回的笔记片段回答；不要补充片段以外的知识。
 5. 工具返回 found 为 false 时，第一句明确回复“没有找到对应片段”，不要编造答案。
 6. 回答简洁、自然；使用笔记时说明来源文件名。
+7. 若检索片段含图片且与问题相关，引用该图片中的信息；无关图片不要引用。
 """.strip()
 
 
@@ -194,6 +195,7 @@ def _build_source_chunks(chunks: list[dict[str, Any]]) -> list[SourceChunk]:
                 header_path=header_path,
                 chunk_id=str(chunk.get("id", "unknown")),
                 content_preview=str(chunk.get("content", ""))[:200],
+                image_path=metadata.get("image_path"),
             )
         )
 

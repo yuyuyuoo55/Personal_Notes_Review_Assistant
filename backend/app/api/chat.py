@@ -11,7 +11,9 @@ from backend.app.schemas.chat import ChatRequest
 from backend.app.core.auth import require_user_deepseek_api_key
 from backend.app.services.multimodal_service import (
     ImageProcessingError,
-    stream_deepseek_image_answer,
+    describe_image_url,
+    image_data_url,
+    validate_image,
 )
 from backend.app.services.rag_service import (
     get_reranker_model,
@@ -134,29 +136,49 @@ def chat(
 @router.post("/image")
 async def chat_with_image(
     query: str = Form(..., min_length=1, max_length=500),
+    mode: str = Form("fast"),
+    conversation_id: str = Form(""),
     image: UploadFile = File(...),
     api_key: str = Depends(require_user_deepseek_api_key),
 ) -> StreamingResponse:
-    """聊天图片使用用户 DeepSeek Key 直答，不读取笔记库、不走 RAG。"""
+    """Describe the uploaded image, then use description plus question for RAG."""
     image_bytes = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
+    try:
+        mime = validate_image(image_bytes, content_type)
+        description = await describe_image_url(image_data_url(image_bytes, mime), api_key)
+        rag_query = f"图片内容：{description}\n\n用户问题：{query}"
+        preparation = prepare_rag_answer(
+            original_query=rag_query,
+            mode=mode,
+            conversation_id=conversation_id,
+            api_key=api_key,
+        )
+        preparation_error = None
+    except ImageProcessingError as error:
+        preparation = None
+        preparation_error = str(error)
+
     def event_stream() -> Generator[str, None, None]:
         started_at = perf_counter()
-        yield sse_event(
-            "meta",
-            {"rewritten_query": query, "mode": "vision", "sources": []},
-        )
-        try:
-            for content in stream_deepseek_image_answer(
-                question=query,
-                image_bytes=image_bytes,
-                content_type=content_type,
-                api_key=api_key,
-            ):
-                yield sse_event("token", {"content": content})
-        except ImageProcessingError as error:
-            yield sse_event("token", {"content": str(error)})
+        if preparation_error:
+            yield sse_event("meta", {"rewritten_query": query, "mode": mode, "sources": []})
+            yield sse_event("token", {"content": preparation_error})
+        else:
+            meta_sent = False
+            if mode == "accurate":
+                yield sse_event("meta", {"rewritten_query": preparation.rewritten_query, "mode": mode, "sources": [source.model_dump() for source in preparation.sources]})
+                meta_sent = True
+            for item in preparation.answer_stream:
+                if item.event == "sources":
+                    yield sse_event("meta", {"rewritten_query": preparation.rewritten_query, "mode": mode, "sources": [source.model_dump() for source in item.sources or []]})
+                    meta_sent = True
+                elif item.event == "token":
+                    if not meta_sent:
+                        yield sse_event("meta", {"rewritten_query": preparation.rewritten_query, "mode": mode, "sources": []})
+                        meta_sent = True
+                    yield sse_event("token", {"content": item.content})
         yield sse_event(
             "done",
             {"elapsed_ms": round((perf_counter() - started_at) * 1000)},

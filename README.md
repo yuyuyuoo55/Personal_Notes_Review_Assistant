@@ -13,7 +13,7 @@
 - **本地数据持久化**：原始 Markdown、Chroma 向量索引和 BM25 索引均保存在本机。
 - **流式交互**：FastAPI 通过 SSE 返回检索阶段、来源、回答 token 和耗时。
 - **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
-- **多模态图片理解**：聊天图片由 DeepSeek Vision 直接回答；Markdown 内图片经 OSS 与 VLM 描述后再进入原有 RAG。
+- **多模态图片检索**：Markdown 图片保存到本地并生成可检索描述；聊天图片也会先转成描述，再参与当前 RAG 模式。
 
 > 当前版本是单机 MVP：仅支持 `.md` 文件；章节小测、批量导入、笔记更新/删除和多用户能力尚未实现。
 
@@ -62,9 +62,9 @@ flowchart LR
 flowchart LR
     A[上传 Markdown] --> B[格式/空文件/重名校验]
     B --> IMG{包含公网图片或 data URI?}
-    IMG -->|是| OSS[上传部署者 OSS]
-    OSS --> VLM[DeepSeek Vision / 可选 Qwen-VL]
-    VLM --> C[描述回填 Markdown]
+    IMG -->|是| LOCAL[保存到本地 images 目录]
+    LOCAL --> VLM[DeepSeek Vision / 可选 Qwen-VL]
+    VLM --> C[描述回填 Markdown + 生成图片块]
     IMG -->|否| C
     C --> H[按 H1/H2/H3 标题切分]
     H --> D[生成稳定 chunk_id]
@@ -149,19 +149,13 @@ Copy-Item .env.example .env
 DASHSCOPE_API_KEY=YOUR_API_KEY_HERE
 ```
 
-Markdown 图片处理还需配置 OSS：
+如需启用部署者付费的 Qwen-VL 后备，可配置：
 
 ```dotenv
-OSS_ACCESS_KEY_ID=YOUR_OSS_ACCESS_KEY_ID_HERE
-OSS_ACCESS_KEY_SECRET=YOUR_OSS_ACCESS_KEY_SECRET_HERE
-OSS_ENDPOINT=https://oss-cn-YOUR_REGION.aliyuncs.com
-OSS_BUCKET_NAME=YOUR_BUCKET_NAME
-OSS_PUBLIC_BASE_URL=
-OSS_URL_EXPIRES_SECONDS=3600
 VLM_FALLBACK_TO_QWEN=false
 ```
 
-`OSS_PUBLIC_BASE_URL` 留空时会生成短时签名 URL，适合私有 Bucket。若开启 `VLM_FALLBACK_TO_QWEN=true`，DeepSeek 图片识别失败后会使用部署者的 DashScope Key，相关费用由部署者承担。
+默认不启用后备。若开启 `VLM_FALLBACK_TO_QWEN=true`，DeepSeek 图片识别失败后会使用部署者的 DashScope Key，相关费用由部署者承担。OSS 旧配置可以保留，但已不参与图片主链路。
 
 不要把真实 Key 写入 README、截图、日志或 Git 提交。
 
@@ -194,11 +188,11 @@ uv run streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 85
 
 ### 5. 使用步骤
 
-1. 在侧边栏“请输入您的DeepSeek API Key”中填写自己的 Key。
+1. 在侧边栏填写自己的 DeepSeek API Key，点击“验证 Key”；验证通过后控件才会解锁。
 2. 在左侧上传一份非空 `.md` 笔记。该上传控件始终只接受 Markdown。
 3. 点击“导入到笔记库”，等待图片描述、切分与向量化完成。
 4. 选择“快速模式”或“精确查找”，输入问题查看回答与来源。
-5. 如需直接理解图片，在聊天输入框下方选择图片，再输入“这张图片讲了什么”。图片问答直接使用 DeepSeek Vision，不走 RAG。
+5. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会把图片描述与问题一起用于当前 RAG 模式。
 
 用户 Key 只保存在当前 Streamlit `session_state`，并通过 `X-DeepSeek-API-Key` 请求头传给后端；不会写入数据库、配置文件或日志。
 
@@ -215,9 +209,9 @@ uv run pytest -q
 - `GET /api/health` 健康检查；
 - logger 命名行为。
 
-本仓库当前验证结果为 `7 passed`。新增测试覆盖缺 Key、图片 SSE 直答、错误降级、Markdown 图片描述回填、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
+本仓库当前验证结果为 `11 passed`。测试覆盖缺 Key、Key 验证、图片参与 RAG、错误降级、本地图片块、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
 
-多模态回归用例位于 `tests/test_multimodal.py`：上传一张测试图片并提问“这张图片讲了什么”，断言 SSE 回答包含“会议时间为周五下午三点”，同时确认没有调用 RAG。
+多模态回归用例位于 `tests/test_multimodal.py`：验证图片描述会与用户问题拼接并进入 RAG，同时检查本地图片块及来源 metadata。
 
 ## 工程结构
 
@@ -251,7 +245,8 @@ Personal_Notes_Review_Assistant/
 | `GET` | `/api/notes` | 查询已导入笔记及片段数 |
 | `POST` | `/api/notes/import` | 上传单个 `.md` 文件，表单字段名为 `file` |
 | `POST` | `/api/chat` | SSE 问答；支持 `fast` / `accurate` 模式 |
-| `POST` | `/api/chat/image` | multipart 图片直答；字段为 `query` 和 `image`，不走 RAG |
+| `POST` | `/api/chat/image` | multipart 图片 RAG；字段为 `query`、`image`、`mode` 和 `conversation_id` |
+| `POST` | `/api/key/validate` | 验证请求头中的 DeepSeek Key，不保存 Key |
 
 `/api/notes/import`、`/api/chat` 和 `/api/chat/image` 都要求请求头：
 
@@ -273,7 +268,7 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 
 - 仅支持单个 Markdown 文件导入，不支持 PDF、批量导入、更新和删除。
 - 单个 `.md` 无法携带用户电脑上的本地图片文件；文档图片增强支持公网 HTTPS 图片和 data URI，本地绝对路径会提示后跳过。
-- OSS 或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
+- 本地保存或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
 - 快速模式会话记忆保存在进程内，后端重启后清空。
 - 精确模式的 Cross-Encoder 首次加载较慢，且当前没有最低精排分阈值。
 - 自动评测依赖特定测试笔记，固定分数不能直接迁移到其他知识库。
@@ -284,7 +279,7 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 
 - `.env`、个人笔记、向量索引、BM25 索引和日志默认不提交。
 - 用户 DeepSeek Key 只存在当前页面会话与单次请求内存中，不入库、不写日志、不拼进 Prompt。
-- OSS AccessKey 和部署者 DashScope Key 只由后端 `.env`/Streamlit Secrets 读取，绝不返回前端。
+- 部署者 DashScope Key 只由后端 `.env`/Streamlit Secrets 读取，绝不返回前端；OSS 旧配置不再参与图片链路。
 - 上传前请先移除笔记中的姓名、账号、公司内部信息等隐私内容。
 - 模型问答与向量化会调用外部 API；敏感资料不应直接导入。
 - 项目不联网搜索补充答案，但模型服务本身仍是外部依赖。
