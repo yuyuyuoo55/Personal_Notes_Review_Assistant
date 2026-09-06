@@ -125,6 +125,7 @@ async def enrich_markdown_images(
 ) -> MarkdownImageResult:
     """逐图增强 Markdown；单图失败只记录安全 warning，不中断文档。"""
     matches = list(MARKDOWN_IMAGE_PATTERN.finditer(markdown))
+    doc_id = Path(source_path).stem if source_path else ""
     result = MarkdownImageResult(markdown=markdown, image_total=len(matches))
     if not matches:
         return result
@@ -154,6 +155,7 @@ async def enrich_markdown_images(
                 "source": source_path,
                 "image_path": local_path,
                 "is_image_chunk": True,
+                "doc_id": doc_id,
             }
             metadata.update(_headers_before(markdown, match.start()))
             metadata["chunk_id"] = sha256(

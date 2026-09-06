@@ -1,6 +1,6 @@
 # 个人笔记复习助手
 
-一个面向个人技术笔记的本地 RAG 学习工具。上传 Markdown 笔记后，可以用自然语言提问，系统会返回带文件名、章节和原文片段的答案；没有可靠依据时明确拒答。
+一个面向个人技术笔记的本地 RAG 学习工具。上传 Markdown 或单张图片后，可以用自然语言提问，系统会返回带文件名、章节和原文片段的答案；没有可靠依据时明确拒答。
 
 ![项目主界面](docs/images/project-overview.png)
 
@@ -10,12 +10,12 @@
 - **两条检索链路**：快速模式由 Agent 按需检索；精确模式固定执行混合检索与精排。
 - **面向中文笔记**：BM25 使用 `pkuseg` 分词，并与向量检索进行 RRF 排名融合。
 - **资料不足拒答**：检索结果不可靠时提示补充笔记，不使用联网知识强行回答。
-- **本地数据持久化**：原始 Markdown、Chroma 向量索引和 BM25 索引均保存在本机。
+- **本地数据持久化**：原始 Markdown、导入图片、Chroma 向量索引和 BM25 索引均保存在本机。
 - **流式交互**：FastAPI 通过 SSE 返回检索阶段、来源、回答 token 和耗时。
 - **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
-- **多模态图片检索**：Markdown 图片保存到本地并生成可检索描述；聊天图片也会先转成描述，再参与当前 RAG 模式。
+- **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片也会先转成描述，再参与当前 RAG 模式。
 
-> 当前版本是单机 MVP：仅支持 `.md` 文件；章节小测、批量导入、笔记更新/删除和多用户能力尚未实现。
+> 当前版本是单机 MVP：支持 `.md`、`.jpg`、`.jpeg`、`.png`、`.webp` 单文件导入；章节小测、批量导入、笔记更新/删除和多用户能力尚未实现。
 
 ## 双模式设计
 
@@ -33,7 +33,7 @@ flowchart LR
     U[用户] --> UI[Streamlit 前端]
     UI --> API[FastAPI + SSE]
 
-    API --> INGEST[Markdown 导入与标题切分]
+    API --> INGEST[Markdown / 独立图片导入]
     INGEST --> FILES[(本地原文)]
     INGEST --> EMB[DashScope Embedding]
     EMB --> CHROMA[(Chroma)]
@@ -60,9 +60,9 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[上传 Markdown] --> B[格式/空文件/重名校验]
-    B --> IMG{包含公网图片或 data URI?}
-    IMG -->|是| LOCAL[保存到本地 images 目录]
+    A[上传 Markdown 或图片] --> B[格式/空文件/重名校验]
+    B --> IMG{独立图片或 Markdown 内图片?}
+    IMG -->|是| LOCAL[保存到文档专属 images 目录]
     LOCAL --> VLM[DeepSeek Vision / 可选 Qwen-VL]
     VLM --> C[描述回填 Markdown + 生成图片块]
     IMG -->|否| C
@@ -189,7 +189,7 @@ uv run streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 85
 ### 5. 使用步骤
 
 1. 在侧边栏填写自己的 DeepSeek API Key，点击“验证 Key”；验证通过后控件才会解锁。
-2. 在左侧上传一份非空 `.md` 笔记。该上传控件始终只接受 Markdown。
+2. 在左侧上传一份非空 `.md` 笔记，或一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片。
 3. 点击“导入到笔记库”，等待图片描述、切分与向量化完成。
 4. 选择“快速模式”或“精确查找”，输入问题查看回答与来源。
 5. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会把图片描述与问题一起用于当前 RAG 模式。
@@ -209,7 +209,7 @@ uv run pytest -q
 - `GET /api/health` 健康检查；
 - logger 命名行为。
 
-本仓库当前验证结果为 `11 passed`。测试覆盖缺 Key、Key 验证、图片参与 RAG、错误降级、本地图片块、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
+本仓库当前验证结果见实际执行输出。测试覆盖缺 Key、Key 验证、图片参与 RAG、错误降级、本地图片块、独立图片清单恢复、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
 
 多模态回归用例位于 `tests/test_multimodal.py`：验证图片描述会与用户问题拼接并进入 RAG，同时检查本地图片块及来源 metadata。
 
@@ -266,7 +266,7 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 
 ## 已知边界
 
-- 仅支持单个 Markdown 文件导入，不支持 PDF、批量导入、更新和删除。
+- 仅支持单个 Markdown 或单张图片导入，不支持 PDF、批量导入、更新和删除。
 - 单个 `.md` 无法携带用户电脑上的本地图片文件；文档图片增强支持公网 HTTPS 图片和 data URI，本地绝对路径会提示后跳过。
 - 本地保存或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
 - 快速模式会话记忆保存在进程内，后端重启后清空。

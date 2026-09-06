@@ -15,7 +15,7 @@ from backend.app.services.agent_service import FastAgentEvent, stream_fast_agent
 from backend.app.services.bm25_retriever import bm25_retriever, _HAS_PKUSEG
 from backend.app.services.chat_service import generate_responses_based_on_the_data
 from backend.app.services.note_loader import load_notes
-from backend.app.services.image_chunk_store import load_image_chunks
+from backend.app.services.image_chunk_store import load_image_chunks, load_standalone_image_chunks
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.query_rewriter import query_rewrite
 from backend.app.services.reranker import cross_encoder_reranker_index, _HAS_SENTENCE_TRANSFORMERS
@@ -136,7 +136,7 @@ def is_reranker_cached() -> bool:
 
 @lru_cache
 def load_all_chunks() -> tuple[Document, ...]:
-    """读取 data/uploads 的所有 Markdown，并按既有规则切分。"""
+    """读取所有 Markdown 与独立图片清单，重建精确检索语料。"""
     if not UPLOAD_DIRECTORY.exists():
         return ()
 
@@ -145,6 +145,7 @@ def load_all_chunks() -> tuple[Document, ...]:
         docs = load_notes(str(file_path))
         all_chunks.extend(split_documents(docs))
         all_chunks.extend(load_image_chunks(file_path))
+    all_chunks.extend(load_standalone_image_chunks(UPLOAD_DIRECTORY))
     return tuple(all_chunks)
 
 

@@ -230,8 +230,8 @@ with st.sidebar:
         st.success(st.session_state.pop("note_import_success"))
 
     uploaded_file = st.file_uploader(
-        "选择 Markdown 文件",
-        type=["md"],
+        "选择 Markdown 或图片文件",
+        type=["md", "jpg", "jpeg", "png", "webp"],
         disabled=not has_api_key,
         label_visibility="collapsed",
         key=f"note_uploader_{st.session_state.note_uploader_version}",
@@ -253,7 +253,7 @@ with st.sidebar:
                 "file": (
                     uploaded_file.name,
                     uploaded_file.getvalue(),
-                    "text/markdown",
+                    uploaded_file.type or "application/octet-stream",
                 )
             }
             response = httpx.post(
@@ -267,6 +267,10 @@ with st.sidebar:
             st.session_state.note_import_success = (
                 f"已导入 {result['file_name']} · {result['chunk_count']} 个片段"
             )
+            if result.get("image_processed"):
+                st.session_state.note_import_success += (
+                    f"；{result['image_processed']} 张图片已识别"
+                )
             if result.get("warnings"):
                 st.session_state.note_import_success += (
                     f"；{result.get('image_processed', 0)} 张图片已识别，"

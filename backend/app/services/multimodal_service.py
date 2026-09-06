@@ -3,12 +3,14 @@
 import asyncio
 import base64
 import json
+from hashlib import sha256
 from mimetypes import guess_extension
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
+from langchain_core.documents import Document
 
 from backend.app.core.config import (
     DASHSCOPE_API_KEY,
@@ -89,6 +91,43 @@ def image_path_to_data_url(image_path: str | Path) -> str:
     image_bytes = path.read_bytes()
     mime = validate_image(image_bytes, content_type)
     return image_data_url(image_bytes, mime)
+
+
+async def build_image_chunk(
+    image_bytes: bytes,
+    content_type: str,
+    doc_dir: str | Path,
+    source_path: str | Path,
+    api_key: str,
+    doc_id: str,
+) -> Document:
+    """Save one standalone image, describe it with Vision, and build a RAG chunk."""
+    local_path: str | None = None
+    try:
+        local_path = await asyncio.to_thread(
+            save_image_to_local, image_bytes, content_type, doc_dir
+        )
+        description = await describe_image_url(image_path_to_data_url(local_path), api_key)
+        source = str(source_path)
+        chunk_id = sha256(
+            f"{source}:{local_path}:{description}".encode("utf-8")
+        ).hexdigest()[:16]
+        return Document(
+            page_content=description,
+            metadata={
+                "source": source,
+                "image_path": local_path,
+                "is_image_chunk": True,
+                "standalone_image": True,
+                "Header 1": Path(source).name,
+                "chunk_id": chunk_id,
+                "doc_id": doc_id,
+            },
+        )
+    except Exception:
+        if local_path:
+            Path(local_path).unlink(missing_ok=True)
+        raise
 
 
 async def validate_deepseek_api_key(api_key: str) -> None:

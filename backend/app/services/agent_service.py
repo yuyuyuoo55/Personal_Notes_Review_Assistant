@@ -15,6 +15,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from backend.app.core.config import UPLOAD_DIRECTORY
 from backend.app.schemas.note import SourceChunk
+from backend.app.services.image_chunk_store import load_standalone_image_chunks
 from backend.app.services.vector_retriever import vector_retriever
 from backend.app.storage.vector_store import vector_store
 
@@ -112,7 +113,9 @@ def search_personal_notes(query: str) -> str:
     """在用户已导入的个人笔记中检索与问题相关的 Top-3 语义片段。"""
 
     # 5.1 没有笔记时不访问可能遗留旧数据的向量库。
-    if not UPLOAD_DIRECTORY.exists() or not any(UPLOAD_DIRECTORY.glob("*.md")):
+    has_markdown = UPLOAD_DIRECTORY.exists() and any(UPLOAD_DIRECTORY.glob("*.md"))
+    has_images = bool(load_standalone_image_chunks(UPLOAD_DIRECTORY))
+    if not has_markdown and not has_images:
         return json.dumps(
             {"found": False, "chunks": []},
             ensure_ascii=False,

@@ -1,6 +1,8 @@
 """笔记接口：相当于 Spring Boot 的 NotesController。"""
 
+from hashlib import sha256
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
@@ -10,7 +12,18 @@ from backend.app.core.config import UPLOAD_DIRECTORY
 from backend.app.schemas.note import ImportResult, NoteSummary
 from backend.app.services.note_loader import load_notes
 from backend.app.services.markdown_image_service import enrich_markdown_images
-from backend.app.services.image_chunk_store import manifest_path, save_image_chunks
+from backend.app.services.image_chunk_store import (
+    load_standalone_image_chunks,
+    manifest_path,
+    remove_image_doc_dir,
+    save_image_chunks,
+    standalone_image_names,
+)
+from backend.app.services.multimodal_service import (
+    ImageProcessingError,
+    InvalidApiKeyError,
+    build_image_chunk,
+)
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.rag_service import invalidate_rag_cache
 from backend.app.storage.vector_store import knowledge_to_vector, vector_store
@@ -31,21 +44,23 @@ async def import_note(
     file: UploadFile = File(...),
     api_key: str = Depends(require_user_deepseek_api_key),
 ) -> ImportResult:
-    """接收一个 Markdown 文件，调用既有 RAG 服务完成加载、切分和向量化。"""
-    # 2. 读取安全的文件名，并限制当前 MVP 只接收 Markdown。
+    """接收一个 Markdown 或图片文件，完成本地保存、构块和向量化。"""
+    # 2. 读取安全的文件名，并限制当前 MVP 支持的导入格式。
     file_name = Path(file.filename or "").name
 
-    if not file_name or Path(file_name).suffix.lower() != ".md":
+    suffix = Path(file_name).suffix.lower()
+    image_suffixes = {".jpg", ".jpeg", ".png", ".webp"}
+    if not file_name or suffix not in {".md", *image_suffixes}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前只支持上传 .md 格式笔记",
+            detail="当前只支持 .md、.jpg、.jpeg、.png 或 .webp 格式笔记",
         )
 
     # 3. 保存上传文件。UploadFile.read() 是异步 I/O，所以接口使用 async def。
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
     file_path = UPLOAD_DIRECTORY / file_name
 
-    if file_path.exists():
+    if file_path.exists() or file_name in standalone_image_names(UPLOAD_DIRECTORY):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="同名笔记已存在；当前版本不重复导入",
@@ -59,7 +74,37 @@ async def import_note(
             detail="上传文件不能为空",
         )
 
+    doc_dir: Path | None = None
     try:
+        if suffix in image_suffixes:
+            safe_stem = re.sub(r"[^0-9A-Za-z_-]+", "-", Path(file_name).stem).strip("-") or "image"
+            doc_id = f"{safe_stem}-{sha256(file_name.encode('utf-8')).hexdigest()[:8]}"
+            doc_dir = UPLOAD_DIRECTORY / doc_id
+            source_path = UPLOAD_DIRECTORY / file_name
+            image_chunk = await build_image_chunk(
+                file_content,
+                file.content_type or "",
+                doc_dir,
+                source_path,
+                api_key,
+                doc_id,
+            )
+            await run_in_threadpool(save_image_chunks, doc_dir, [image_chunk])
+            success = await run_in_threadpool(knowledge_to_vector, [image_chunk])
+            if not success:
+                raise RuntimeError("图片描述没有可写入向量库的内容")
+            invalidate_rag_cache()
+            return ImportResult(
+                file_name=file_name,
+                chunk_count=1,
+                status="success",
+                error_msg=None,
+                image_total=1,
+                image_processed=1,
+                image_skipped=0,
+                warnings=[],
+            )
+
         try:
             markdown = file_content.decode("utf-8")
         except UnicodeDecodeError as error:
@@ -105,10 +150,26 @@ async def import_note(
         file_path.unlink(missing_ok=True)
         manifest_path(file_path).unlink(missing_ok=True)
         raise
+    except InvalidApiKeyError as error:
+        if doc_dir and doc_dir.exists():
+            remove_image_doc_dir(doc_dir, UPLOAD_DIRECTORY)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DeepSeek API Key 无效，图片导入已中止。请检查 API Key 后重试。",
+        ) from error
+    except ImageProcessingError as error:
+        if doc_dir and doc_dir.exists():
+            remove_image_doc_dir(doc_dir, UPLOAD_DIRECTORY)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
     except Exception as error:
         # 本次导入失败时删除刚保存的文件，避免留下无法使用的上传文件。
         file_path.unlink(missing_ok=True)
         manifest_path(file_path).unlink(missing_ok=True)
+        if doc_dir and doc_dir.exists():
+            remove_image_doc_dir(doc_dir, UPLOAD_DIRECTORY)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="笔记导入失败，请检查配置后重试",
@@ -134,6 +195,16 @@ def list_notes() -> list[NoteSummary]:
                 note_id=file_path.stem,
                 file_name=file_path.name,
                 chunk_count=len(stored_chunks["ids"]),
+            )
+        )
+
+    for chunk in load_standalone_image_chunks(UPLOAD_DIRECTORY):
+        source = Path(str(chunk.metadata["source"]))
+        notes.append(
+            NoteSummary(
+                note_id=str(chunk.metadata.get("doc_id", source.stem)),
+                file_name=source.name,
+                chunk_count=1,
             )
         )
 

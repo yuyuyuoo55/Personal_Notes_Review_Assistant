@@ -54,7 +54,7 @@ CHROMA_PERSIST_DIRECTORY = _resolve_project_path(
 BM25_INDEX_PATH = _resolve_project_path(
     os.getenv("BM25_INDEX_PATH", "data/bm25/notes.bm25")
 )
-# 用户通过 FastAPI 上传的 Markdown 文件统一保存到项目内的此目录。
+# 用户通过 FastAPI 上传的 Markdown 和图片文件统一保存到项目内的此目录。
 UPLOAD_DIRECTORY = PROJECT_ROOT / "data" / "uploads"
 LOG_DIRECTORY = PROJECT_ROOT / "logs"
 

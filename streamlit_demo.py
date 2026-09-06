@@ -21,8 +21,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import time
+from hashlib import sha256
+from mimetypes import guess_type
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -60,6 +63,7 @@ from backend.app.core.config import UPLOAD_DIRECTORY  # noqa: E402
 from backend.app.services.markdown_image_service import enrich_markdown_images  # noqa: E402
 from backend.app.services.multimodal_service import (  # noqa: E402
     ImageProcessingError,
+    build_image_chunk,
     describe_image_url,
     image_data_url,
     validate_image,
@@ -70,7 +74,13 @@ try:
     from backend.app.services.multimodal_service import validate_deepseek_api_key  # noqa: E402
 except ImportError:  # pragma: no cover
     validate_deepseek_api_key = None
-from backend.app.services.image_chunk_store import save_image_chunks  # noqa: E402
+from backend.app.services.image_chunk_store import (  # noqa: E402
+    load_standalone_image_chunks,
+    manifest_path,
+    remove_image_doc_dir,
+    save_image_chunks,
+    standalone_image_names,
+)
 from backend.app.services.note_loader import load_notes  # noqa: E402
 from backend.app.services.note_splitter import split_documents  # noqa: E402
 from backend.app.services.rag_service import (  # noqa: E402
@@ -99,19 +109,62 @@ def list_notes() -> list[dict]:
                 "chunk_count": len(stored["ids"]),
             }
         )
+    for chunk in load_standalone_image_chunks(UPLOAD_DIRECTORY):
+        source = Path(str(chunk.metadata["source"]))
+        notes.append(
+            {
+                "file_name": source.name,
+                "chunk_count": 1,
+            }
+        )
     return notes
 
 
-def import_note(file_name: str, file_content: bytes, api_key: str) -> dict:
+def import_note(
+    file_name: str,
+    file_content: bytes,
+    api_key: str,
+    content_type: str | None = None,
+) -> dict:
     """保存笔记、切分、写入 Chroma，并让 RAG 缓存失效（等价后端 import_note）。"""
-    if not file_name.lower().endswith(".md"):
-        raise ValueError("当前只支持 .md 格式笔记")
+    suffix = Path(file_name).suffix.lower()
+    image_suffixes = {".jpg", ".jpeg", ".png", ".webp"}
+    if suffix not in {".md", *image_suffixes}:
+        raise ValueError("当前只支持 .md、.jpg、.jpeg、.png 或 .webp 格式笔记")
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
     file_path = UPLOAD_DIRECTORY / file_name
-    if file_path.exists():
+    if file_path.exists() or file_name in standalone_image_names(UPLOAD_DIRECTORY):
         raise ValueError("同名笔记已存在；当前版本不重复导入")
     if not file_content:
         raise ValueError("上传文件不能为空")
+    if suffix in image_suffixes:
+        safe_stem = re.sub(r"[^0-9A-Za-z_-]+", "-", Path(file_name).stem).strip("-") or "image"
+        doc_id = f"{safe_stem}-{sha256(file_name.encode('utf-8')).hexdigest()[:8]}"
+        doc_dir = UPLOAD_DIRECTORY / doc_id
+        try:
+            image_chunk = asyncio.run(build_image_chunk(
+                file_content,
+                content_type or guess_type(file_name)[0] or "",
+                doc_dir,
+                file_path,
+                api_key,
+                doc_id,
+            ))
+            save_image_chunks(doc_dir, [image_chunk])
+            if not knowledge_to_vector([image_chunk]):
+                raise RuntimeError("图片描述没有可写入向量库的内容")
+            invalidate_rag_cache()
+            return {
+                "file_name": file_name,
+                "chunk_count": 1,
+                "image_processed": 1,
+                "image_skipped": 0,
+            }
+        except Exception:
+            if doc_dir.exists():
+                remove_image_doc_dir(doc_dir, UPLOAD_DIRECTORY)
+            raise
+
     try:
         markdown = file_content.decode("utf-8")
     except UnicodeDecodeError as error:
@@ -130,6 +183,7 @@ def import_note(file_name: str, file_content: bytes, api_key: str) -> dict:
     save_image_chunks(file_path, image_result.image_chunks)
     if not knowledge_to_vector(chunks):
         file_path.unlink(missing_ok=True)
+        manifest_path(file_path).unlink(missing_ok=True)
         raise RuntimeError("笔记切分后没有可写入向量库的内容")
     invalidate_rag_cache()
     return {
@@ -177,11 +231,13 @@ st.markdown(
     [data-testid="stSidebar"] h1 { font-size: 1.55rem; }
     .block-container { max-width: 1260px; padding-top: 3rem; padding-bottom: 2rem; }
     [data-testid="stFileUploader"] {
-        background: #ffffffb8; border: 1px dashed #9db9a6; border-radius: 16px;
-        padding: .7rem .85rem;
+        background: #ffffffb8; border: 1px dashed #9db9a6; border-radius: 12px;
+        padding: .3rem .45rem; max-width: 340px; margin-left: auto; margin-right: auto;
     }
-    [data-testid="stFileUploader"] section { padding: .2rem; }
-    [data-testid="stFileUploaderDropzone"] { border: 0; background: transparent; }
+    [data-testid="stFileUploader"] section { padding: .1rem; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] { border: 0; background: transparent; padding: .1rem; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] button { min-height: 1.8rem; font-size: .8rem; }
+    [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] small { display: none; }
     [data-testid="stSidebar"] .stButton > button {
         background: var(--peach-strong); color: white; border: 0;
         border-radius: 10px; font-weight: 650; min-height: 2.7rem;
@@ -303,8 +359,8 @@ with st.sidebar:
         st.success(st.session_state.pop("note_import_success"))
 
     uploaded_file = st.file_uploader(
-        "选择 Markdown 文件",
-        type=["md"],
+        "选择 Markdown 或图片文件",
+        type=["md", "jpg", "jpeg", "png", "webp"],
         disabled=not has_api_key,
         label_visibility="collapsed",
         key=f"note_uploader_{st.session_state.note_uploader_version}",
@@ -324,6 +380,7 @@ with st.sidebar:
                 uploaded_file.name,
                 uploaded_file.getvalue(),
                 st.session_state.deepseek_api_key,
+                uploaded_file.type,
             )
             image_note = ""
             if result["image_processed"]:
@@ -335,7 +392,7 @@ with st.sidebar:
             )
             st.session_state.note_uploader_version += 1
             st.rerun()
-        except (ValueError, RuntimeError) as error:
+        except (ValueError, RuntimeError, ImageProcessingError) as error:
             st.error(str(error))
 
     st.divider()
@@ -465,10 +522,12 @@ with chat_column:
         "例如：RRF 和加权融合有什么区别？",
         disabled=not has_api_key,
     )
+    # 图片上传：紧贴聊天框，仅一行提示，压缩高度，视觉上更像输入区的一部分。
     uploaded_chat_image = st.file_uploader(
-        "可选：上传图片，图片描述会随问题一起参与 RAG 检索",
+        "📎 上传图片（参与检索）",
         type=["jpg", "jpeg", "png", "gif", "webp"],
         disabled=not has_api_key,
+        label_visibility="collapsed",
         key=f"chat_image_{st.session_state.chat_image_uploader_version}",
     )
 

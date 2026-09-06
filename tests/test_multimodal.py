@@ -3,9 +3,16 @@ import base64
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from langchain_core.documents import Document
 
 from backend.app.main import app
+from backend.app.api import notes as notes_api
 from backend.app.services import markdown_image_service
+from backend.app.services import multimodal_service
+from backend.app.services.image_chunk_store import (
+    load_standalone_image_chunks,
+    save_image_chunks,
+)
 from backend.app.services.multimodal_service import ImageProcessingError, InvalidApiKeyError
 from backend.app.services.rag_service import create_chat_model
 
@@ -174,3 +181,109 @@ def test_invalid_api_key_aborts_markdown_import(monkeypatch, tmp_path):
     except InvalidApiKeyError as error:
         assert "API Key 无效" in str(error)
         assert "导入已中止" in str(error)
+
+
+def test_build_standalone_image_chunk_has_retrieval_metadata(monkeypatch, tmp_path):
+    image_path = tmp_path / "doc" / "images" / "saved.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nmock")
+
+    def fake_save(*args):
+        return str(image_path.resolve())
+
+    async def fake_describe(image_url, api_key):
+        assert image_url.startswith("data:image/png;base64,")
+        assert api_key == TEST_KEY
+        return "图片里记录了 RAG 检索流程"
+
+    monkeypatch.setattr(multimodal_service, "save_image_to_local", fake_save)
+    monkeypatch.setattr(multimodal_service, "describe_image_url", fake_describe)
+    chunk = asyncio.run(multimodal_service.build_image_chunk(
+        image_path.read_bytes(),
+        "image/png",
+        tmp_path / "doc",
+        tmp_path / "rag.png",
+        TEST_KEY,
+        "rag-1234",
+    ))
+
+    assert chunk.page_content == "图片里记录了 RAG 检索流程"
+    assert chunk.metadata["is_image_chunk"] is True
+    assert chunk.metadata["standalone_image"] is True
+    assert chunk.metadata["doc_id"] == "rag-1234"
+    assert chunk.metadata["source"].endswith("rag.png")
+    assert chunk.metadata["image_path"] == str(image_path.resolve())
+    assert len(chunk.metadata["chunk_id"]) == 16
+
+
+def test_standalone_image_manifest_can_be_reloaded(tmp_path):
+    doc_dir = tmp_path / "diagram-1234"
+    chunk = Document(
+        page_content="系统架构图",
+        metadata={
+            "source": str(tmp_path / "diagram.png"),
+            "image_path": str(doc_dir / "images" / "saved.png"),
+            "is_image_chunk": True,
+            "standalone_image": True,
+            "chunk_id": "image-chunk-id",
+            "doc_id": "diagram-1234",
+        },
+    )
+    doc_dir.mkdir()
+    save_image_chunks(doc_dir, [chunk])
+
+    loaded = load_standalone_image_chunks(tmp_path)
+    assert len(loaded) == 1
+    assert loaded[0].page_content == "系统架构图"
+    assert loaded[0].metadata["doc_id"] == "diagram-1234"
+
+
+def test_backend_imports_standalone_image_and_lists_it(monkeypatch, tmp_path):
+    async def fake_build(image_bytes, content_type, doc_dir, source_path, api_key, doc_id):
+        assert content_type == "image/png"
+        assert api_key == TEST_KEY
+        image_path = doc_dir / "images" / "saved.png"
+        image_path.parent.mkdir(parents=True)
+        image_path.write_bytes(image_bytes)
+        return Document(
+            page_content="图片里的向量检索笔记",
+            metadata={
+                "source": str(source_path),
+                "image_path": str(image_path.resolve()),
+                "is_image_chunk": True,
+                "standalone_image": True,
+                "chunk_id": "standalone-test",
+                "doc_id": doc_id,
+            },
+        )
+
+    monkeypatch.setattr(notes_api, "UPLOAD_DIRECTORY", tmp_path)
+    monkeypatch.setattr(notes_api, "build_image_chunk", fake_build)
+    monkeypatch.setattr(notes_api, "knowledge_to_vector", lambda chunks: True)
+    monkeypatch.setattr(notes_api, "invalidate_rag_cache", lambda: None)
+
+    response = client.post(
+        "/api/notes/import",
+        headers={"X-DeepSeek-API-Key": TEST_KEY},
+        files={"file": ("diagram.png", b"\x89PNG\r\n\x1a\nmock", "image/png")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["image_processed"] == 1
+    assert response.json()["chunk_count"] == 1
+    assert list(tmp_path.glob("*/*.images.json"))
+    listed = notes_api.list_notes()
+    assert [(item.file_name, item.chunk_count) for item in listed] == [("diagram.png", 1)]
+
+
+def test_backend_rejects_image_with_invalid_signature(monkeypatch, tmp_path):
+    monkeypatch.setattr(notes_api, "UPLOAD_DIRECTORY", tmp_path)
+    response = client.post(
+        "/api/notes/import",
+        headers={"X-DeepSeek-API-Key": TEST_KEY},
+        files={"file": ("fake.png", b"not-a-png", "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert "不匹配" in response.json()["detail"]
+    assert not list(tmp_path.iterdir())
