@@ -12,6 +12,8 @@ import streamlit as st
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 DEEPSEEK_API_KEY_HEADER = "X-DeepSeek-API-Key"
 
+st.set_page_config(page_title="笔记复习助手", page_icon="📚", layout="wide")
+
 if "deepseek_api_key" not in st.session_state:
     st.session_state.deepseek_api_key = ""
 if "validated_api_key" not in st.session_state:
@@ -22,8 +24,8 @@ if "pending_note_delete" not in st.session_state:
     st.session_state.pending_note_delete = None
 if "confirm_delete_all" not in st.session_state:
     st.session_state.confirm_delete_all = False
-
-st.set_page_config(page_title="笔记复习助手", page_icon="📚", layout="wide")
+if "note_uploader_version" not in st.session_state:
+    st.session_state.note_uploader_version = 0
 
 st.markdown(
     """
@@ -47,15 +49,19 @@ st.markdown(
             var(--cream);
     }
     [data-testid="stHeader"] { background: transparent; }
-    [data-testid="stSidebar"] {
-        background: #eef2ed;
-        border-right: 1px solid #d9e2da;
-    }
-    [data-testid="stSidebar"] > div:first-child { padding-top: 2.6rem; }
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
     h1, h2, h3 { color: var(--ink); letter-spacing: -0.035em; }
-    [data-testid="stSidebar"] h1 { font-size: 1.55rem; }
-    .block-container { max-width: 1260px; padding-top: 3rem; padding-bottom: 2rem; }
+    .block-container { max-width: 1260px; padding-top: 1.4rem; padding-bottom: 2rem; }
+    .app-brand { color: #184d38; font-size: 1.38rem; font-weight: 800; padding-top: .2rem; }
+    .app-brand span { color: var(--muted); font-size: .8rem; font-weight: 500; margin-left: .65rem; }
+    [data-testid="stRadio"] > div { gap: .3rem; justify-content: flex-end; }
+    [data-testid="stRadio"] label {
+        background: transparent; border-radius: 9px; padding: .4rem .72rem;
+        color: var(--muted); font-weight: 650;
+    }
+    [data-testid="stRadio"] label:has(input:checked) { background: #e5efe7; color: #205d43; }
+    .page-heading { margin: 1.8rem 0 1.15rem; }
+    .page-heading h1 { font-size: 2rem; margin: 0 0 .25rem; }
+    .page-heading p { color: var(--muted); margin: 0; }
     [data-testid="stFileUploader"] {
         background: #ffffffb8;
         border: 1px dashed #9db9a6;
@@ -64,7 +70,7 @@ st.markdown(
     }
     [data-testid="stFileUploader"] section { padding: .2rem; }
     [data-testid="stFileUploaderDropzone"] { border: 0; background: transparent; }
-    [data-testid="stSidebar"] .stButton > button {
+    .stButton > button {
         background: var(--peach-strong);
         color: white;
         border: 0;
@@ -72,10 +78,11 @@ st.markdown(
         font-weight: 650;
         min-height: 2.7rem;
     }
-    [data-testid="stSidebar"] .stButton > button:disabled {
+    .stButton > button:disabled {
         background: #d8d9d3;
         color: #8b928c;
     }
+    .stButton > button p { white-space: nowrap; }
     /* 问答区已选模式使用鼠尾草绿，和 UI 图一致；侧边栏导入按钮仍保持桃色。 */
     [data-testid="stMain"] [data-testid="stButton"] > button[kind="primary"] {
         background: var(--sage-strong);
@@ -147,6 +154,13 @@ st.markdown(
     .note-item b { font-size: .88rem; color: var(--ink); }
     .note-item span { display: block; color: var(--muted); font-size: .78rem; margin-top: .12rem; }
     .source-label { color: var(--sage-strong); font-size: .82rem; font-weight: 700; }
+    .privacy-note { color: var(--muted); font-size: .86rem; text-align: center; margin-top: .8rem; }
+    .about-card {
+        max-width: 820px; margin: 1.4rem auto; background: rgba(255,253,249,.86);
+        border: 1px solid var(--line); border-radius: 22px; padding: 2rem 2.2rem;
+        box-shadow: 0 14px 36px rgba(62,74,63,.07);
+    }
+    .tech-chip { display:inline-block; padding:.38rem .65rem; margin:.2rem; border-radius:99px; background:#edf4ed; color:#315d45; font-size:.82rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -203,47 +217,130 @@ def render_sources(sources: list[dict]) -> None:
             st.divider()
 
 
+def has_valid_api_key() -> bool:
+    """Key 只有通过验证且未被再次编辑时才可用于业务请求。"""
+    current_key = st.session_state.deepseek_api_key.strip()
+    return bool(current_key) and st.session_state.validated_api_key == current_key
+
+
+def go_to_settings() -> None:
+    st.session_state.active_page = "设置"
+
+
+def clear_api_key() -> None:
+    st.session_state.deepseek_api_key = ""
+    st.session_state.validated_api_key = ""
+
+
+def render_settings_page() -> None:
+    st.markdown(
+        "<div class='page-heading'><h1>设置</h1><p>配置当前浏览器会话使用的模型访问凭据。</p></div>",
+        unsafe_allow_html=True,
+    )
+    _, settings_column, _ = st.columns([1.1, 1.5, 1.1])
+    with settings_column:
+        with st.container(border=True):
+            st.subheader("DeepSeek API Key")
+            st.text_input(
+                "API Key",
+                type="password",
+                key="deepseek_api_key",
+                placeholder="请输入 DeepSeek API Key",
+                help="仅保存在当前浏览器会话，并随单次请求发送。",
+            )
+            save_column, clear_column = st.columns(2)
+            if save_column.button("保存并验证", type="primary", use_container_width=True):
+                if not st.session_state.deepseek_api_key.strip():
+                    st.session_state.validated_api_key = ""
+                    st.warning("请先输入 API Key")
+                else:
+                    try:
+                        response = httpx.post(
+                            f"{API_BASE_URL}/api/key/validate",
+                            headers={
+                                DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key.strip()
+                            },
+                            timeout=30,
+                        )
+                        response.raise_for_status()
+                        result = response.json()
+                        if result.get("valid"):
+                            st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
+                            st.success("已保存，当前会话内有效")
+                        else:
+                            st.session_state.validated_api_key = ""
+                            st.error(result.get("message", "API Key 验证失败"))
+                    except (httpx.HTTPError, ValueError):
+                        st.session_state.validated_api_key = ""
+                        st.error("无法连接 DeepSeek，请稍后重试")
+            clear_column.button("清除 Key", use_container_width=True, on_click=clear_api_key)
+            if has_valid_api_key():
+                st.success("已保存，当前会话内有效")
+        st.markdown(
+            "<div class='privacy-note'>🔒 Key 仅保存在当前浏览器会话中，不会写入数据库或日志。刷新或关闭会话后可能清空。</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_about_page() -> None:
+    st.markdown(
+        """
+        <div class='page-heading'><h1>关于</h1><p>了解这个项目解决什么问题，以及它是如何构建的。</p></div>
+        <div class='about-card'>
+            <div class='eyebrow'>PERSONAL KNOWLEDGE SPACE</div>
+            <h2>笔记复习助手</h2>
+            <p>基于 RAG 与视觉理解的个人笔记复习工具，帮助你从自己的资料中提问、回顾并追溯答案来源。</p>
+            <hr>
+            <h4>技术栈</h4>
+            <div>
+                <span class='tech-chip'>FastAPI</span><span class='tech-chip'>Streamlit</span>
+                <span class='tech-chip'>LangChain</span><span class='tech-chip'>Chroma</span>
+                <span class='tech-chip'>BM25</span><span class='tech-chip'>DeepSeek Vision</span>
+            </div>
+            <hr>
+            <p><strong>开源地址</strong><br><a href='https://gitee.com/yuyuyuoo55/langchain-rag-intellgent-qa_system' target='_blank'>查看项目仓库 ↗</a></p>
+            <small>感谢每一位使用并提出反馈的朋友。</small>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+brand_column, nav_column = st.columns([1.2, 2], vertical_alignment="center")
+brand_column.markdown(
+    "<div class='app-brand'>▣ 笔记复习助手 <span>会话内安全连接</span></div>",
+    unsafe_allow_html=True,
+)
+selected_page = nav_column.radio(
+    "页面导航",
+    ["智能问答", "知识库", "设置", "关于"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="active_page",
+)
+st.divider()
+
+if selected_page == "设置":
+    render_settings_page()
+    st.stop()
+if selected_page == "关于":
+    render_about_page()
+    st.stop()
+
+has_api_key = has_valid_api_key()
 notes, notes_load_error = get_notes()
 existing_note_names = {note["file_name"] for note in notes}
 
 # 导入成功后递增 key，使 Streamlit 重建上传控件并清空刚才选中的文件。
 # 否则页面 rerun 后仍保留该文件，会马上被“重复导入”校验命中，容易造成误解。
-if "note_uploader_version" not in st.session_state:
-    st.session_state.note_uploader_version = 0
-
-with st.sidebar:
-    st.title("📚 笔记复习助手")
-    st.caption("把课堂与技术笔记，变成可追溯的复习资料。")
-    st.text_input(
-        "请输入您的DeepSeek API Key",
-        type="password",
-        key="deepseek_api_key",
-        help="仅保存在当前浏览器会话，并随单次请求发送；不会写入数据库或日志。",
-    )
-    if st.button("验证 Key", use_container_width=True):
-        try:
-            response = httpx.post(
-                f"{API_BASE_URL}/api/key/validate",
-                headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key.strip()},
-                timeout=30,
-            )
-            response.raise_for_status()
-            result = response.json()
-            if result.get("valid"):
-                st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
-                st.success(result["message"])
-            else:
-                st.session_state.validated_api_key = ""
-                st.error(result["message"])
-        except (httpx.HTTPError, ValueError):
-            st.session_state.validated_api_key = ""
-            st.error("无法连接 DeepSeek，请稍后重试")
-    has_api_key = bool(st.session_state.deepseek_api_key.strip()) and (
-        st.session_state.validated_api_key == st.session_state.deepseek_api_key.strip()
+def render_library_page() -> None:
+    st.markdown(
+        "<div class='page-heading'><h1>知识库</h1><p>集中导入、查看和管理用于检索的学习资料。</p></div>",
+        unsafe_allow_html=True,
     )
     if not has_api_key:
-        st.info("请输入并验证 API Key")
-    st.markdown("#### 导入笔记")
+        st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
+    st.markdown("### 导入资料")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
 
@@ -334,7 +431,9 @@ with st.sidebar:
             st.rerun()
 
         for note in notes:
-            note_col, delete_col = st.columns([4, 1.35])
+            note_col, delete_col = st.columns(
+                [3.6, 1.7], gap="small", vertical_alignment="center"
+            )
             note_col.markdown(
                 f"<div class='note-item'><b>📄 {note['file_name']}</b><span>{note['chunk_count']} 个知识片段</span></div>",
                 unsafe_allow_html=True,
@@ -370,6 +469,15 @@ with st.sidebar:
                     st.session_state.pending_note_delete = None
                     st.rerun()
 
+
+if selected_page == "知识库":
+    render_library_page()
+    st.stop()
+
+if not has_api_key:
+    warning_column, action_column = st.columns([5, 1])
+    warning_column.warning("请先在「设置」页填写并验证 DeepSeek API Key，完成后即可开始提问。")
+    action_column.button("前往设置", use_container_width=True, on_click=go_to_settings)
 
 note_count = len(notes)
 chunk_count = sum(note["chunk_count"] for note in notes)

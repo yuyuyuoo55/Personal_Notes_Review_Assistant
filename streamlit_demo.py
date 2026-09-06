@@ -231,22 +231,21 @@ st.markdown(
             var(--cream);
     }
     [data-testid="stHeader"] { background: transparent; }
-    [data-testid="stSidebar"] { background: #eef2ed; border-right: 1px solid #d9e2da; }
-    [data-testid="stSidebar"] > div:first-child { padding-top: 2.6rem; }
-    /* 暗黑主题下侧边栏为浅色底，强制标题/说明文字用深色，避免看不清 */
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] label p,
-    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
-    [data-testid="stSidebar"] .stCaption,
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-        color: var(--ink) !important;
-    }
-    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, h1, h2, h3 {
+    h1, h2, h3 {
         color: var(--ink); letter-spacing: -0.035em;
     }
-    [data-testid="stSidebar"] h1 { font-size: 1.55rem; }
-    .block-container { max-width: 1260px; padding-top: 3rem; padding-bottom: 2rem; }
+    .block-container { max-width: 1260px; padding-top: 1.4rem; padding-bottom: 2rem; }
+    .app-brand { color: #184d38; font-size: 1.38rem; font-weight: 800; padding-top: .2rem; }
+    .app-brand span { color: var(--muted); font-size: .8rem; font-weight: 500; margin-left: .65rem; }
+    [data-testid="stRadio"] > div { gap: .3rem; justify-content: flex-end; }
+    [data-testid="stRadio"] label {
+        background: transparent; border-radius: 9px; padding: .4rem .72rem;
+        color: var(--muted); font-weight: 650;
+    }
+    [data-testid="stRadio"] label:has(input:checked) { background: #e5efe7; color: #205d43; }
+    .page-heading { margin: 1.8rem 0 1.15rem; }
+    .page-heading h1 { font-size: 2rem; margin: 0 0 .25rem; }
+    .page-heading p { color: var(--muted); margin: 0; }
     [data-testid="stFileUploader"] {
         background: #ffffffb8; border: 1px dashed #9db9a6; border-radius: 12px;
         padding: .3rem .45rem; max-width: 340px; margin-left: auto; margin-right: auto;
@@ -255,11 +254,12 @@ st.markdown(
     [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] { border: 0; background: transparent; padding: .1rem; }
     [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] button { min-height: 1.8rem; font-size: .8rem; }
     [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] small { display: none; }
-    [data-testid="stSidebar"] .stButton > button {
+    .stButton > button {
         background: var(--peach-strong); color: white; border: 0;
         border-radius: 10px; font-weight: 650; min-height: 2.7rem;
     }
-    [data-testid="stSidebar"] .stButton > button:disabled { background: #d8d9d3; color: #8b928c; }
+    .stButton > button:disabled { background: #d8d9d3; color: #8b928c; }
+    .stButton > button p { white-space: nowrap; }
     [data-testid="stMain"] [data-testid="stButton"] > button[kind="primary"] {
         background: var(--sage-strong); border-color: var(--sage-strong); color: #ffffff;
     }
@@ -324,17 +324,18 @@ st.markdown(
     .note-item b { font-size: .88rem; color: var(--ink); }
     .note-item span { display: block; color: var(--muted); font-size: .78rem; margin-top: .12rem; }
     .source-label { color: var(--sage-strong); font-size: .82rem; font-weight: 700; }
+    .privacy-note { color: var(--muted); font-size: .86rem; text-align: center; margin-top: .8rem; }
+    .about-card {
+        max-width: 820px; margin: 1.4rem auto; background: rgba(255,253,249,.86);
+        border: 1px solid var(--line); border-radius: 22px; padding: 2rem 2.2rem;
+        box-shadow: 0 14px 36px rgba(62,74,63,.07);
+    }
+    .tech-chip { display:inline-block; padding:.38rem .65rem; margin:.2rem; border-radius:99px; background:#edf4ed; color:#315d45; font-size:.82rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
-# ---------------------------------------------------------------------------
-# 侧边栏：导入笔记 + 笔记库
-# ---------------------------------------------------------------------------
-notes = list_notes()
-existing_note_names = {note["file_name"] for note in notes}
 
 if "note_uploader_version" not in st.session_state:
     st.session_state.note_uploader_version = 0
@@ -349,33 +350,115 @@ if "pending_note_delete" not in st.session_state:
 if "confirm_delete_all" not in st.session_state:
     st.session_state.confirm_delete_all = False
 
-with st.sidebar:
-    st.title("📚 笔记复习助手")
-    st.caption("把课堂与技术笔记，变成可追溯的复习资料。")
-    st.text_input(
-        "请输入您的DeepSeek API Key",
-        type="password",
-        key="deepseek_api_key",
-        placeholder="sk-...",
-        help="用于问答的 DeepSeek API Key（在 platform.deepseek.com 申请）。仅保存在当前浏览器会话，不会写入数据库、日志或项目文件。",
+def has_valid_api_key() -> bool:
+    current_key = st.session_state.deepseek_api_key.strip()
+    return bool(current_key) and st.session_state.validated_api_key == current_key
+
+
+def go_to_settings() -> None:
+    st.session_state.active_page = "设置"
+
+
+def clear_api_key() -> None:
+    st.session_state.deepseek_api_key = ""
+    st.session_state.validated_api_key = ""
+
+
+def render_settings_page() -> None:
+    st.markdown(
+        "<div class='page-heading'><h1>设置</h1><p>配置当前浏览器会话使用的模型访问凭据。</p></div>",
+        unsafe_allow_html=True,
     )
-    if st.button("验证 Key", use_container_width=True):
-        if validate_deepseek_api_key is None:
-            st.error("当前环境缺少 Key 验证组件，请先部署最新代码后重试。")
-        else:
-            try:
-                asyncio.run(validate_deepseek_api_key(st.session_state.deepseek_api_key.strip()))
-                st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
-                st.success("您的 DeepSeek API Key 有效，可以使用")
-            except ImageProcessingError as error:
-                st.session_state.validated_api_key = ""
-                st.error(str(error))
-    has_api_key = bool(st.session_state.deepseek_api_key.strip()) and (
-        st.session_state.validated_api_key == st.session_state.deepseek_api_key.strip()
+    _, settings_column, _ = st.columns([1.1, 1.5, 1.1])
+    with settings_column:
+        with st.container(border=True):
+            st.subheader("DeepSeek API Key")
+            st.text_input(
+                "API Key",
+                type="password",
+                key="deepseek_api_key",
+                placeholder="请输入 DeepSeek API Key",
+                help="仅保存在当前浏览器会话，并随单次请求发送。",
+            )
+            save_column, clear_column = st.columns(2)
+            if save_column.button("保存并验证", type="primary", use_container_width=True):
+                if not st.session_state.deepseek_api_key.strip():
+                    st.session_state.validated_api_key = ""
+                    st.warning("请先输入 API Key")
+                elif validate_deepseek_api_key is None:
+                    st.session_state.validated_api_key = ""
+                    st.error("当前环境缺少 Key 验证组件，请先部署最新代码后重试。")
+                else:
+                    try:
+                        asyncio.run(validate_deepseek_api_key(st.session_state.deepseek_api_key.strip()))
+                        st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
+                        st.success("已保存，当前会话内有效")
+                    except ImageProcessingError as error:
+                        st.session_state.validated_api_key = ""
+                        st.error(str(error))
+            clear_column.button("清除 Key", use_container_width=True, on_click=clear_api_key)
+            if has_valid_api_key():
+                st.success("已保存，当前会话内有效")
+        st.markdown(
+            "<div class='privacy-note'>🔒 Key 仅保存在当前浏览器会话中，不会写入数据库或日志。刷新或关闭会话后可能清空。</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_about_page() -> None:
+    st.markdown(
+        """
+        <div class='page-heading'><h1>关于</h1><p>了解这个项目解决什么问题，以及它是如何构建的。</p></div>
+        <div class='about-card'>
+            <div class='eyebrow'>PERSONAL KNOWLEDGE SPACE</div>
+            <h2>笔记复习助手</h2>
+            <p>基于 RAG 与视觉理解的个人笔记复习工具，帮助你从自己的资料中提问、回顾并追溯答案来源。</p>
+            <hr><h4>技术栈</h4>
+            <div><span class='tech-chip'>FastAPI</span><span class='tech-chip'>Streamlit</span>
+            <span class='tech-chip'>LangChain</span><span class='tech-chip'>Chroma</span>
+            <span class='tech-chip'>BM25</span><span class='tech-chip'>DeepSeek Vision</span></div>
+            <hr><p><strong>开源地址</strong><br><a href='https://gitee.com/yuyuyuoo55/langchain-rag-intellgent-qa_system' target='_blank'>查看项目仓库 ↗</a></p>
+            <small>感谢每一位使用并提出反馈的朋友。</small>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+brand_column, nav_column = st.columns([1.2, 2], vertical_alignment="center")
+brand_column.markdown(
+    "<div class='app-brand'>▣ 笔记复习助手 <span>会话内安全连接</span></div>",
+    unsafe_allow_html=True,
+)
+selected_page = nav_column.radio(
+    "页面导航",
+    ["智能问答", "知识库", "设置", "关于"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="active_page",
+)
+st.divider()
+
+if selected_page == "设置":
+    render_settings_page()
+    st.stop()
+if selected_page == "关于":
+    render_about_page()
+    st.stop()
+
+has_api_key = has_valid_api_key()
+notes = list_notes()
+existing_note_names = {note["file_name"] for note in notes}
+
+
+def render_library_page() -> None:
+    st.markdown(
+        "<div class='page-heading'><h1>知识库</h1><p>集中导入、查看和管理用于检索的学习资料。</p></div>",
+        unsafe_allow_html=True,
     )
     if not has_api_key:
-        st.info("请先输入您的 DeepSeek API Key，再进行提问或导入笔记。")
-    st.markdown("#### 导入笔记")
+        st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
+    st.markdown("### 导入资料")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
 
@@ -442,7 +525,9 @@ with st.sidebar:
             st.rerun()
 
         for note in notes:
-            note_col, delete_col = st.columns([4, 1.35])
+            note_col, delete_col = st.columns(
+                [3.6, 1.7], gap="small", vertical_alignment="center"
+            )
             note_col.markdown(
                 f"<div class='note-item'><b>📄 {note['file_name']}</b>"
                 f"<span>{note['chunk_count']} 个知识片段</span></div>",
@@ -477,6 +562,15 @@ with st.sidebar:
                     st.session_state.pending_note_delete = None
                     st.rerun()
 
+
+if selected_page == "知识库":
+    render_library_page()
+    st.stop()
+
+if not has_api_key:
+    warning_column, action_column = st.columns([5, 1])
+    warning_column.warning("请先在「设置」页填写并验证 DeepSeek API Key，完成后即可开始提问。")
+    action_column.button("前往设置", use_container_width=True, on_click=go_to_settings)
 
 # ---------------------------------------------------------------------------
 # 主区域
