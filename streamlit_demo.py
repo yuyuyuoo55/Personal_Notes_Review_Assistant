@@ -654,16 +654,17 @@ with chat_column:
                             st.divider()
                 if answer and not answer.startswith("本次问答"):
                     st.caption(f"本次回答耗时：{elapsed_ms / 1000:.2f} 秒")
+                # 无论是否带图，回答都应存入历史消息，否则 rerun 后纯文字回答会丢失。
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": answer,
+                        "sources": sources,
+                        "elapsed_ms": elapsed_ms,
+                    }
+                )
                 if uploaded_chat_image:
                     st.session_state.chat_image_uploader_version += 1
-                    st.session_state.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": answer,
-                            "sources": sources,
-                            "elapsed_ms": elapsed_ms,
-                        }
-                    )
                 st.rerun()
 
 with focus_column:
