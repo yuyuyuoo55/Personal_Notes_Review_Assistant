@@ -26,6 +26,7 @@ from backend.app.services.multimodal_service import (
 )
 from backend.app.services.note_splitter import split_documents
 from backend.app.services.rag_service import invalidate_rag_cache
+from backend.app.services.note_delete_service import delete_all_notes, delete_note
 from backend.app.storage.vector_store import knowledge_to_vector, vector_store
 
 # 1. 创建本模块的路由器；prefix 相当于类上的 @RequestMapping("/api/notes")。
@@ -192,20 +193,55 @@ def list_notes() -> list[NoteSummary]:
 
         notes.append(
             NoteSummary(
-                note_id=file_path.stem,
+                note_id=f"md:{file_path.name}",
                 file_name=file_path.name,
                 chunk_count=len(stored_chunks["ids"]),
+                kind="md",
+                source=str(file_path),
             )
         )
 
+    seen_doc_ids: set[str] = set()
     for chunk in load_standalone_image_chunks(UPLOAD_DIRECTORY):
         source = Path(str(chunk.metadata["source"]))
+        doc_id = str(chunk.metadata.get("doc_id", source.stem))
+        if doc_id in seen_doc_ids:
+            continue
+        seen_doc_ids.add(doc_id)
         notes.append(
             NoteSummary(
-                note_id=str(chunk.metadata.get("doc_id", source.stem)),
+                note_id=f"image:{doc_id}",
                 file_name=source.name,
                 chunk_count=1,
+                kind="image",
+                doc_id=doc_id,
+                source=str(source),
             )
         )
 
     return notes
+
+
+@router.delete("/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_one_note(
+    note_id: str,
+    _api_key: str = Depends(require_user_deepseek_api_key),
+) -> None:
+    """删除单条笔记；note_id 格式为 md:<文件名> 或 image:<doc_id>。"""
+    kind, separator, identifier = note_id.partition(":")
+    if not separator or kind not in {"md", "image"} or not identifier:
+        raise HTTPException(status_code=400, detail="笔记标识无效")
+    try:
+        delete_note(identifier, kind)  # type: ignore[arg-type]
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+def delete_every_note(
+    _api_key: str = Depends(require_user_deepseek_api_key),
+) -> None:
+    """清空全部笔记。"""
+    delete_all_notes()

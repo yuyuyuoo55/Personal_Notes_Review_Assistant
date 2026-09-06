@@ -83,6 +83,10 @@ from backend.app.services.image_chunk_store import (  # noqa: E402
 )
 from backend.app.services.note_loader import load_notes  # noqa: E402
 from backend.app.services.note_splitter import split_documents  # noqa: E402
+from backend.app.services.note_delete_service import (  # noqa: E402
+    delete_all_notes,
+    delete_note,
+)
 from backend.app.services.rag_service import (  # noqa: E402
     get_reranker_model,
     invalidate_rag_cache,
@@ -105,16 +109,29 @@ def list_notes() -> list[dict]:
         stored = vector_store.get(where={"source": str(file_path)})
         notes.append(
             {
+                "note_id": f"md:{file_path.name}",
                 "file_name": file_path.name,
                 "chunk_count": len(stored["ids"]),
+                "kind": "md",
+                "source": str(file_path),
+                "doc_id": None,
             }
         )
+    seen_doc_ids: set[str] = set()
     for chunk in load_standalone_image_chunks(UPLOAD_DIRECTORY):
         source = Path(str(chunk.metadata["source"]))
+        doc_id = str(chunk.metadata.get("doc_id", source.stem))
+        if doc_id in seen_doc_ids:
+            continue
+        seen_doc_ids.add(doc_id)
         notes.append(
             {
+                "note_id": f"image:{doc_id}",
                 "file_name": source.name,
                 "chunk_count": 1,
+                "kind": "image",
+                "source": str(source),
+                "doc_id": doc_id,
             }
         )
     return notes
@@ -327,6 +344,10 @@ if "validated_api_key" not in st.session_state:
     st.session_state.validated_api_key = ""
 if "chat_image_uploader_version" not in st.session_state:
     st.session_state.chat_image_uploader_version = 0
+if "pending_note_delete" not in st.session_state:
+    st.session_state.pending_note_delete = None
+if "confirm_delete_all" not in st.session_state:
+    st.session_state.confirm_delete_all = False
 
 with st.sidebar:
     st.title("📚 笔记复习助手")
@@ -401,12 +422,60 @@ with st.sidebar:
     if not notes:
         st.caption("还没有导入笔记")
     else:
+        if st.session_state.confirm_delete_all:
+            st.warning("确认清空全部笔记？此操作无法撤销。")
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button("确认清空", type="primary", use_container_width=True):
+                delete_all_notes()
+                st.session_state.confirm_delete_all = False
+                st.session_state.pending_note_delete = None
+                st.rerun()
+            if cancel_col.button("取消", use_container_width=True):
+                st.session_state.confirm_delete_all = False
+                st.rerun()
+        elif st.button(
+            "🗑 清空全部",
+            use_container_width=True,
+            disabled=not has_api_key,
+        ):
+            st.session_state.confirm_delete_all = True
+            st.rerun()
+
         for note in notes:
-            st.markdown(
+            note_col, delete_col = st.columns([4, 1.35])
+            note_col.markdown(
                 f"<div class='note-item'><b>📄 {note['file_name']}</b>"
                 f"<span>{note['chunk_count']} 个知识片段</span></div>",
                 unsafe_allow_html=True,
             )
+            if delete_col.button(
+                "🗑 删除",
+                key=f"delete_{note['note_id']}",
+                disabled=not has_api_key,
+                use_container_width=True,
+            ):
+                st.session_state.pending_note_delete = note["note_id"]
+                st.rerun()
+            if st.session_state.pending_note_delete == note["note_id"]:
+                st.warning(f"确认删除「{note['file_name']}」？")
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button(
+                    "确认删除",
+                    key=f"confirm_{note['note_id']}",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    identifier = note["doc_id"] if note["kind"] == "image" else Path(note["source"]).name
+                    delete_note(identifier, note["kind"])
+                    st.session_state.pending_note_delete = None
+                    st.rerun()
+                if cancel_col.button(
+                    "取消",
+                    key=f"cancel_{note['note_id']}",
+                    use_container_width=True,
+                ):
+                    st.session_state.pending_note_delete = None
+                    st.rerun()
 
 
 # ---------------------------------------------------------------------------

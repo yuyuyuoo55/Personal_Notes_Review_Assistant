@@ -17,6 +17,9 @@ class NoteSummary(BaseModel):
     note_id: str # 系统内笔记唯一标识，后续删除/重建索引时使用
     file_name: str # 前端展示的笔记文件名
     chunk_count: int # 该笔记当前包含的 Chunk 数量
+    kind: Literal["md", "image"]
+    source: str
+    doc_id: str | None = None
 
 class SourceChunk(BaseModel):
     """回答引用的一段原始笔记。"""

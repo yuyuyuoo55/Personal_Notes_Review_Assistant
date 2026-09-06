@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
@@ -17,6 +18,10 @@ if "validated_api_key" not in st.session_state:
     st.session_state.validated_api_key = ""
 if "chat_image_uploader_version" not in st.session_state:
     st.session_state.chat_image_uploader_version = 0
+if "pending_note_delete" not in st.session_state:
+    st.session_state.pending_note_delete = None
+if "confirm_delete_all" not in st.session_state:
+    st.session_state.confirm_delete_all = False
 
 st.set_page_config(page_title="笔记复习助手", page_icon="📚", layout="wide")
 
@@ -167,6 +172,19 @@ def get_notes() -> tuple[list[dict], str | None]:
     return [], "暂时无法读取笔记库，请稍后刷新页面。"
 
 
+def delete_note_request(note_id: str | None = None) -> None:
+    """调用后端删除接口；Key 只放在本次请求头。"""
+    url = f"{API_BASE_URL}/api/notes"
+    if note_id:
+        url += f"/{quote(note_id, safe=':')}"
+    with httpx.Client(timeout=30, trust_env=False) as client:
+        response = client.delete(
+            url,
+            headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
+        )
+        response.raise_for_status()
+
+
 def render_sources(sources: list[dict]) -> None:
     """展示后端 SSE meta 事件返回的来源片段。"""
     if not sources:
@@ -297,11 +315,60 @@ with st.sidebar:
     elif not notes:
         st.caption("还没有导入笔记")
     else:
+        if st.session_state.confirm_delete_all:
+            st.warning("确认清空全部笔记？此操作无法撤销。")
+            confirm_col, cancel_col = st.columns(2)
+            if confirm_col.button("确认清空", type="primary", use_container_width=True):
+                try:
+                    delete_note_request()
+                    st.session_state.confirm_delete_all = False
+                    st.session_state.pending_note_delete = None
+                    st.rerun()
+                except httpx.HTTPError:
+                    st.error("清空失败，请确认后端服务正常")
+            if cancel_col.button("取消", use_container_width=True):
+                st.session_state.confirm_delete_all = False
+                st.rerun()
+        elif st.button("🗑 清空全部", use_container_width=True, disabled=not has_api_key):
+            st.session_state.confirm_delete_all = True
+            st.rerun()
+
         for note in notes:
-            st.markdown(
+            note_col, delete_col = st.columns([4, 1.35])
+            note_col.markdown(
                 f"<div class='note-item'><b>📄 {note['file_name']}</b><span>{note['chunk_count']} 个知识片段</span></div>",
                 unsafe_allow_html=True,
             )
+            if delete_col.button(
+                "🗑 删除",
+                key=f"delete_{note['note_id']}",
+                disabled=not has_api_key,
+                use_container_width=True,
+            ):
+                st.session_state.pending_note_delete = note["note_id"]
+                st.rerun()
+            if st.session_state.pending_note_delete == note["note_id"]:
+                st.warning(f"确认删除「{note['file_name']}」？")
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button(
+                    "确认删除",
+                    key=f"confirm_{note['note_id']}",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    try:
+                        delete_note_request(note["note_id"])
+                        st.session_state.pending_note_delete = None
+                        st.rerun()
+                    except httpx.HTTPError:
+                        st.error("删除失败，请确认笔记仍存在且后端服务正常")
+                if cancel_col.button(
+                    "取消",
+                    key=f"cancel_{note['note_id']}",
+                    use_container_width=True,
+                ):
+                    st.session_state.pending_note_delete = None
+                    st.rerun()
 
 
 note_count = len(notes)
