@@ -1,7 +1,10 @@
 import asyncio
 import base64
+import builtins
+import io
 from types import SimpleNamespace
 
+import httpx
 from fastapi.testclient import TestClient
 from langchain_core.documents import Document
 
@@ -14,6 +17,8 @@ from backend.app.services.image_chunk_store import (
     save_image_chunks,
 )
 from backend.app.services.multimodal_service import ImageProcessingError, InvalidApiKeyError
+from backend.app.services.multimodal_service import _raise_for_vision_response
+from backend.app.services.multimodal_service import _maybe_compress_image
 from backend.app.services.rag_service import create_chat_model
 
 
@@ -78,6 +83,52 @@ def test_invalid_image_type_degrades_to_chinese_message():
     assert response.status_code == 200
     assert "仅支持 JPEG、PNG、GIF 或 WebP 图片" in response.text
     assert "event: done" in response.text
+
+
+def test_vision_http_errors_have_actionable_safe_messages():
+    cases = {
+        400: "检查图片尺寸或格式",
+        402: "账户余额不足",
+        429: "请求过于频繁",
+        500: "图片服务暂时异常",
+    }
+    for status_code, expected in cases.items():
+        response = httpx.Response(
+            status_code,
+            request=httpx.Request("POST", "https://api.deepseek.com/chat/completions"),
+            json={"error": {"message": "provider-private-detail"}},
+        )
+        try:
+            _raise_for_vision_response(response)
+            raise AssertionError("Vision HTTP 错误未抛出")
+        except ImageProcessingError as error:
+            assert expected in str(error)
+            assert "provider-private-detail" not in str(error)
+
+
+def test_large_image_is_resized_before_vision():
+    from PIL import Image
+
+    original = io.BytesIO()
+    Image.new("RGB", (2400, 1800), "white").save(original, format="PNG")
+    compressed = _maybe_compress_image(original.getvalue(), "image/png")
+
+    with Image.open(io.BytesIO(compressed)) as result:
+        assert max(result.size) <= 1600
+        assert result.format == "PNG"
+
+
+def test_image_compression_falls_back_when_pillow_is_unavailable(monkeypatch):
+    original_import = builtins.__import__
+
+    def fail_pillow_import(name, *args, **kwargs):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("Pillow unavailable")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_pillow_import)
+    original = b"not-decoded-because-pillow-is-unavailable"
+    assert _maybe_compress_image(original, "image/png") == original
 
 
 def test_invalid_text_api_key_degrades_to_chinese_sse(monkeypatch):

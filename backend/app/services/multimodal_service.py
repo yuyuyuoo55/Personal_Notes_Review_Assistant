@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import io
 import json
 from hashlib import sha256
 from mimetypes import guess_extension
@@ -31,6 +32,8 @@ from backend.app.core.config import (
 
 
 ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+COMPRESS_MAX_EDGE = 1600
+COMPRESS_TARGET_BYTES = 2 * 1024 * 1024
 
 
 class ImageProcessingError(RuntimeError):
@@ -72,6 +75,56 @@ def image_data_url(image_bytes: bytes, content_type: str) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _maybe_compress_image(image_bytes: bytes, content_type: str) -> bytes:
+    """离线缩放大图并尽量压到 2MB；失败时安全回退到原始字节。"""
+    try:
+        from PIL import Image, ImageOps
+
+        mime = (content_type or "").split(";", 1)[0].lower()
+        output_format = {
+            "image/jpeg": "JPEG",
+            "image/png": "PNG",
+            "image/gif": "GIF",
+            "image/webp": "WEBP",
+        }.get(mime)
+        if output_format is None:
+            return image_bytes
+
+        with Image.open(io.BytesIO(image_bytes)) as opened:
+            image = ImageOps.exif_transpose(opened)
+            if max(image.size) <= COMPRESS_MAX_EDGE and len(image_bytes) <= COMPRESS_TARGET_BYTES:
+                return image_bytes
+
+            image.thumbnail((COMPRESS_MAX_EDGE, COMPRESS_MAX_EDGE), Image.Resampling.LANCZOS)
+            working = image.copy()
+            best = image_bytes
+            quality = 88
+            for _attempt in range(4):
+                buffer = io.BytesIO()
+                save_options: dict = {"format": output_format, "optimize": True}
+                if output_format in {"JPEG", "WEBP"}:
+                    if output_format == "JPEG" and working.mode not in {"RGB", "L"}:
+                        working = working.convert("RGB")
+                    save_options["quality"] = quality
+                working.save(buffer, **save_options)
+                candidate = buffer.getvalue()
+                if len(candidate) < len(best):
+                    best = candidate
+                if len(candidate) <= COMPRESS_TARGET_BYTES:
+                    return candidate
+                quality = max(60, quality - 10)
+                working = working.resize(
+                    (
+                        max(1, int(working.width * 0.82)),
+                        max(1, int(working.height * 0.82)),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+            return best
+    except Exception:
+        return image_bytes
+
+
 def save_image_to_local(image_bytes: bytes, content_type: str, doc_dir: str | Path) -> str:
     """Validate and save an imported image below the note's local image directory."""
     mime = validate_image(image_bytes, content_type)
@@ -104,6 +157,10 @@ async def build_image_chunk(
     """Save one standalone image, describe it with Vision, and build a RAG chunk."""
     local_path: str | None = None
     try:
+        validate_image(image_bytes, content_type)
+        image_bytes = await asyncio.to_thread(
+            _maybe_compress_image, image_bytes, content_type
+        )
         local_path = await asyncio.to_thread(
             save_image_to_local, image_bytes, content_type, doc_dir
         )
@@ -161,6 +218,23 @@ def _deepseek_payload(question: str, image_url: str, *, stream: bool) -> dict:
     }
 
 
+def _raise_for_vision_response(response: httpx.Response) -> None:
+    """把 Vision 常见失败转成安全、可操作的中文提示，不回显服务端原文。"""
+    if response.status_code in {401, 403}:
+        raise InvalidApiKeyError("API Key无效，请检查后重试")
+    if response.status_code == 402:
+        raise ImageProcessingError("DeepSeek账户余额不足，充值后再导入图片")
+    if response.status_code == 429:
+        raise ImageProcessingError("DeepSeek请求过于频繁，请稍后再导入图片")
+    if response.status_code == 404:
+        raise ImageProcessingError("DeepSeek图片模型暂不可用，请稍后重试")
+    if response.status_code == 400:
+        raise ImageProcessingError("图片请求被DeepSeek拒绝，请检查图片尺寸或格式")
+    if response.status_code >= 500:
+        raise ImageProcessingError("DeepSeek图片服务暂时异常，请稍后重试")
+    response.raise_for_status()
+
+
 def stream_deepseek_image_answer(
     *, question: str, image_bytes: bytes, content_type: str, api_key: str
 ):
@@ -177,9 +251,7 @@ def stream_deepseek_image_answer(
                 headers=headers,
                 json=_deepseek_payload(question, image_data_url(image_bytes, mime), stream=True),
             ) as response:
-                if response.status_code in {401, 403}:
-                    raise InvalidApiKeyError("API Key无效，请检查后重试")
-                response.raise_for_status()
+                _raise_for_vision_response(response)
                 for line in response.iter_lines():
                     if not line.startswith("data:"):
                         continue
@@ -196,7 +268,9 @@ def stream_deepseek_image_answer(
     except ImageProcessingError:
         raise
     except httpx.TimeoutException as error:
-        raise ImageProcessingError("图片识别超时，请稍后重试") from error
+        raise ImageProcessingError(
+            "图片较大或暂时无法识别，请更换更清晰、较小尺寸的图片后重试"
+        ) from error
     except httpx.HTTPError as error:
         raise ImageProcessingError("图片识别失败，请稍后重试") from error
 
@@ -214,9 +288,7 @@ async def describe_image_url(image_url: str, api_key: str) -> str:
                 headers=headers,
                 json=_deepseek_payload(prompt, image_url, stream=False),
             )
-            if response.status_code in {401, 403}:
-                raise InvalidApiKeyError("API Key无效，图片已跳过")
-            response.raise_for_status()
+            _raise_for_vision_response(response)
             description = response.json()["choices"][0]["message"]["content"]
             if not description:
                 raise ImageProcessingError("图片识别未返回描述")
@@ -228,7 +300,9 @@ async def describe_image_url(image_url: str, api_key: str) -> str:
             raise
     except (httpx.TimeoutException, httpx.HTTPError, KeyError, IndexError, ValueError) as error:
         if not VLM_FALLBACK_TO_QWEN:
-            raise ImageProcessingError("图片识别失败或超时，已跳过") from error
+            raise ImageProcessingError(
+                "图片较大或暂时无法识别，请更换更清晰、较小尺寸的图片后重试"
+            ) from error
 
     try:
         return await asyncio.wait_for(

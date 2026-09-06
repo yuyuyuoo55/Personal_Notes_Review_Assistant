@@ -29,7 +29,7 @@ OSS_OBJECT_PREFIX = os.getenv("OSS_OBJECT_PREFIX", "personal-notes/images").stri
 OSS_URL_EXPIRES_SECONDS = int(os.getenv("OSS_URL_EXPIRES_SECONDS", "3600"))
 QWEN_VL_MODEL = os.getenv("QWEN_VL_MODEL", "qwen-vl-max")
 VLM_FALLBACK_TO_QWEN = os.getenv("VLM_FALLBACK_TO_QWEN", "false").lower() == "true"
-VLM_TIMEOUT_SECONDS = float(os.getenv("VLM_TIMEOUT_SECONDS", "60"))
+VLM_TIMEOUT_SECONDS = float(os.getenv("VLM_TIMEOUT_SECONDS", "180"))
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(8 * 1024 * 1024)))
 
 # RAG 组件使用的名称与本地存储位置。
