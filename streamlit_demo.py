@@ -506,14 +506,14 @@ with chat_column:
                     if sources:
                         with st.expander("参考笔记", expanded=False):
                             for source in sources:
-                                header_path = " > ".join(source["header_path"]) or "未标注标题"
+                                header_path = " > ".join(source.header_path) or "未标注标题"
                                 st.markdown(
-                                    f"<div class='source-label'>📎 {source['file_name']} · {header_path}</div>",
+                                    f"<div class='source-label'>📎 {source.file_name} · {header_path}</div>",
                                     unsafe_allow_html=True,
                                 )
-                                st.write(source["content_preview"])
-                                if source.get("image_path"):
-                                    st.image(source["image_path"])
+                                st.write(source.content_preview)
+                                if getattr(source, "image_path", None):
+                                    st.image(source.image_path)
                                 st.divider()
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
@@ -643,14 +643,14 @@ with chat_column:
                 if sources:
                     with st.expander("参考笔记", expanded=False):
                         for source in sources:
-                            header_path = " > ".join(source["header_path"]) or "未标注标题"
+                            header_path = " > ".join(source.header_path) or "未标注标题"
                             st.markdown(
-                                f"<div class='source-label'>📎 {source['file_name']} · {header_path}</div>",
+                                f"<div class='source-label'>📎 {source.file_name} · {header_path}</div>",
                                 unsafe_allow_html=True,
                             )
-                            st.write(source["content_preview"])
-                            if source.get("image_path"):
-                                st.image(source["image_path"])
+                            st.write(source.content_preview)
+                            if getattr(source, "image_path", None):
+                                st.image(source.image_path)
                             st.divider()
                 if answer and not answer.startswith("本次问答"):
                     st.caption(f"本次回答耗时：{elapsed_ms / 1000:.2f} 秒")
