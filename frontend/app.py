@@ -53,12 +53,6 @@ st.markdown(
     .block-container { max-width: 1260px; padding-top: 1.4rem; padding-bottom: 2rem; }
     .app-brand { color: #184d38; font-size: 1.38rem; font-weight: 800; padding-top: .2rem; }
     .app-brand span { color: var(--muted); font-size: .8rem; font-weight: 500; margin-left: .65rem; }
-    [data-testid="stRadio"] > div { gap: .3rem; justify-content: flex-end; }
-    [data-testid="stRadio"] label {
-        background: transparent; border-radius: 9px; padding: .4rem .72rem;
-        color: var(--muted); font-weight: 650;
-    }
-    [data-testid="stRadio"] label:has(input:checked) { background: #e5efe7; color: #205d43; }
     .page-heading { margin: 1.8rem 0 1.15rem; }
     .page-heading h1 { font-size: 2rem; margin: 0 0 .25rem; }
     .page-heading p { color: var(--muted); margin: 0; }
@@ -161,12 +155,15 @@ st.markdown(
         box-shadow: 0 14px 36px rgba(62,74,63,.07);
     }
     .tech-chip { display:inline-block; padding:.38rem .65rem; margin:.2rem; border-radius:99px; background:#edf4ed; color:#315d45; font-size:.82rem; }
+    .github-link { display:inline-flex; align-items:center; gap:.42rem; margin-top:.45rem; color:#205d43; font-weight:750; text-decoration:none; }
+    .github-link:hover { color:#153f2f; text-decoration:underline; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_notes() -> tuple[list[dict], str | None]:
     """从 FastAPI 获取已导入的笔记；短暂重试，避免后端刚启动时误判为空库。"""
     last_error = ""
@@ -197,6 +194,7 @@ def delete_note_request(note_id: str | None = None) -> None:
             headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
         )
         response.raise_for_status()
+    get_notes.clear()
 
 
 def render_sources(sources: list[dict]) -> None:
@@ -221,10 +219,6 @@ def has_valid_api_key() -> bool:
     """Key 只有通过验证且未被再次编辑时才可用于业务请求。"""
     current_key = st.session_state.deepseek_api_key.strip()
     return bool(current_key) and st.session_state.validated_api_key == current_key
-
-
-def go_to_settings() -> None:
-    st.session_state.active_page = "设置"
 
 
 def clear_api_key() -> None:
@@ -298,7 +292,11 @@ def render_about_page() -> None:
                 <span class='tech-chip'>BM25</span><span class='tech-chip'>DeepSeek Vision</span>
             </div>
             <hr>
-            <p><strong>开源地址</strong><br><a href='https://gitee.com/yuyuyuoo55/langchain-rag-intellgent-qa_system' target='_blank'>查看项目仓库 ↗</a></p>
+            <p><strong>开源地址</strong><br>
+            <a class='github-link' href='https://github.com/yuyuyuoo55/Personal_Notes_Review_Assistant' target='_blank'>
+                <svg width='17' height='17' viewBox='0 0 16 16' fill='currentColor' aria-hidden='true'><path d='M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.51-2.01.38-2.53-.5-2.69-.96-.09-.24-.48-.96-.82-1.15-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.21-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.5 7.5 0 0 1 8 3.89c.68 0 1.36.09 2 .27 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.95.08 2.16.51.57.82 1.3.82 2.19 0 3.12-1.87 3.81-3.65 4.02.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.47.55.39A8.04 8.04 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z'/></svg>
+                GitHub ↗
+            </a></p>
             <small>感谢每一位使用并提出反馈的朋友。</small>
         </div>
         """,
@@ -306,34 +304,12 @@ def render_about_page() -> None:
     )
 
 
-brand_column, nav_column = st.columns([1.2, 2], vertical_alignment="center")
-brand_column.markdown(
-    "<div class='app-brand'>▣ 笔记复习助手 <span>会话内安全连接</span></div>",
-    unsafe_allow_html=True,
-)
-selected_page = nav_column.radio(
-    "页面导航",
-    ["智能问答", "知识库", "设置", "关于"],
-    horizontal=True,
-    label_visibility="collapsed",
-    key="active_page",
-)
-st.divider()
-
-if selected_page == "设置":
-    render_settings_page()
-    st.stop()
-if selected_page == "关于":
-    render_about_page()
-    st.stop()
-
-has_api_key = has_valid_api_key()
-notes, notes_load_error = get_notes()
-existing_note_names = {note["file_name"] for note in notes}
-
 # 导入成功后递增 key，使 Streamlit 重建上传控件并清空刚才选中的文件。
 # 否则页面 rerun 后仍保留该文件，会马上被“重复导入”校验命中，容易造成误解。
 def render_library_page() -> None:
+    has_api_key = has_valid_api_key()
+    notes, notes_load_error = get_notes()
+    existing_note_names = {note["file_name"] for note in notes}
     st.markdown(
         "<div class='page-heading'><h1>知识库</h1><p>集中导入、查看和管理用于检索的学习资料。</p></div>",
         unsafe_allow_html=True,
@@ -391,6 +367,7 @@ def render_library_page() -> None:
                     f"；{result.get('image_processed', 0)} 张图片已识别，"
                     f"{result.get('image_skipped', 0)} 张已跳过"
                 )
+            get_notes.clear()
             st.session_state.note_uploader_version += 1
             st.rerun()
         except httpx.HTTPStatusError as error:
@@ -470,27 +447,52 @@ def render_library_page() -> None:
                     st.rerun()
 
 
-if selected_page == "知识库":
+current_page = "智能问答"
+
+
+def select_page(page_name: str):
+    def activate_page() -> None:
+        global current_page
+        current_page = page_name
+
+    return activate_page
+
+
+st.markdown(
+    "<div class='app-brand'>▣ 笔记复习助手 <span>会话内安全连接</span></div>",
+    unsafe_allow_html=True,
+)
+navigation = st.navigation(
+    [
+        st.Page(select_page("智能问答"), title="智能问答", icon="💬", url_path="chat", default=True),
+        st.Page(select_page("知识库"), title="知识库", icon="📚", url_path="library"),
+        st.Page(select_page("设置"), title="设置", icon="⚙️", url_path="settings"),
+        st.Page(select_page("关于"), title="关于", icon="ℹ️", url_path="about"),
+    ],
+    position="top",
+)
+navigation.run()
+
+if current_page == "知识库":
     render_library_page()
     st.stop()
+if current_page == "设置":
+    render_settings_page()
+    st.stop()
+if current_page == "关于":
+    render_about_page()
+    st.stop()
 
+has_api_key = has_valid_api_key()
+notes, notes_load_error = get_notes()
 if not has_api_key:
-    warning_column, action_column = st.columns([5, 1])
-    warning_column.warning("请先在「设置」页填写并验证 DeepSeek API Key，完成后即可开始提问。")
-    action_column.button("前往设置", use_container_width=True, on_click=go_to_settings)
+    st.warning("请先在顶部导航的「设置」页填写并验证 DeepSeek API Key，完成后即可开始提问。")
 
 note_count = len(notes)
 chunk_count = sum(note["chunk_count"] for note in notes)
 
 st.markdown(
-    f"""
-    <div class="hero-card">
-        <div class="eyebrow">PERSONAL KNOWLEDGE SPACE</div>
-        <h1>从你的笔记里，<em>重新理解知识。</em></h1>
-        <p>提出问题，系统只依据已导入的学习资料回答，并保留可回看的来源。</p>
-        <div class="scope-pill">当前检索范围 · {note_count} 份笔记 · {chunk_count} 个片段</div>
-    </div>
-    """,
+    f"<div class='page-heading'><h1>智能问答</h1><p>当前检索范围 · {note_count} 份笔记 · {chunk_count} 个片段</p></div>",
     unsafe_allow_html=True,
 )
 
