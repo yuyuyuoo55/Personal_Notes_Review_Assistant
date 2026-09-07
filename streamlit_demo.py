@@ -863,20 +863,20 @@ with chat_column:
             disabled=not has_api_key,
         )
     with image_column:
+        # 紧凑的小图标按钮 + 内嵌 file_uploader：选图后显示"已选 + 移除"，不像 popover 那样悬着。
         with st.container(key="chat_image_popover"):
-            with st.popover("添加图片", use_container_width=True):
-                uploaded_chat_image = st.file_uploader(
-                    "选择参与本次问答的图片",
-                    type=["jpg", "jpeg", "png", "gif", "webp"],
-                    disabled=not has_api_key,
-                    label_visibility="collapsed",
-                    key=f"chat_image_{st.session_state.chat_image_uploader_version}",
-                )
-                if uploaded_chat_image:
-                    st.caption(f"已选：{uploaded_chat_image.name}")
-                    if st.button("移除图片", key="remove_chat_image", use_container_width=True):
-                        st.session_state.chat_image_uploader_version += 1
-                        st.rerun()
+            uploaded_chat_image = st.file_uploader(
+                "📎 图片",
+                type=["jpg", "jpeg", "png", "gif", "webp"],
+                disabled=not has_api_key,
+                label_visibility="collapsed",
+                key=f"chat_image_{st.session_state.chat_image_uploader_version}",
+            )
+            if uploaded_chat_image:
+                st.caption(f"已选：{uploaded_chat_image.name}")
+                if st.button("移除图片", key="remove_chat_image", use_container_width=True):
+                    st.session_state.chat_image_uploader_version += 1
+                    st.rerun()
 
     if question:
         if not uploaded_chat_image and not notes:
