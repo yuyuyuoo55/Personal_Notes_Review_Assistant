@@ -591,6 +591,9 @@ def render_library_page() -> None:
 
 
 def render_dashboard_page() -> None:
+    if not has_valid_api_key():
+        st.warning("请先在「设置」页填写并验证 DeepSeek API Key，验证通过后即可查看数据看板。")
+        return
     notes = list_notes()
     note_count = len(notes)
     chunk_count = sum(int(note.get("chunk_count", 0)) for note in notes)
