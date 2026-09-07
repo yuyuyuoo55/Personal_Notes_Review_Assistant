@@ -93,6 +93,18 @@ st.markdown(
         background: #426b55;
         border-color: #426b55;
     }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"] {
+        background: #fffdf9; color: #203047; border: 1px solid #7fa08b;
+        box-shadow: 0 2px 8px rgba(32, 48, 71, .08);
+    }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
+        background: #ecebea; color: #4f5965; border: 1px solid #d7d4cf;
+    }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button { min-height: 2.45rem; }
+    .st-key-chat_image_popover [data-testid="stPopover"] > button {
+        min-height: 2.9rem; background: #fffdf9; color: #315d45;
+        border: 1px solid #b8c9bc; border-radius: 14px;
+    }
     [data-testid="stChatInput"] {
         background: #fffdf9;
         border: 1px solid var(--line);
@@ -166,6 +178,17 @@ st.markdown(
     @media (max-width: 900px) {
         .app-brand span { display: none; }
         [data-testid="stToolbar"] .rc-overflow { padding-left: 180px !important; }
+    }
+    @media (prefers-color-scheme: dark) {
+        :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"] {
+            background: #3a4540; color: #f6faf7; border-color: #8eb69a;
+        }
+        :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
+            background: #24282d; color: #bdc4ca; border-color: #424850;
+        }
+        .st-key-chat_image_popover [data-testid="stPopover"] > button {
+            background: #2b302d; color: #e6eee8; border-color: #56645a;
+        }
     }
     </style>
     """,
@@ -524,6 +547,7 @@ with chat_column:
     with fast_column:
         if st.button(
             "快速模式",
+            key="mode_fast",
             type="primary" if st.session_state.retrieval_mode == "fast" else "secondary",
             use_container_width=True,
         ):
@@ -538,6 +562,7 @@ with chat_column:
     with accurate_column:
         if st.button(
             "精确查找",
+            key="mode_accurate",
             type="primary" if st.session_state.retrieval_mode == "accurate" else "secondary",
             use_container_width=True,
         ):
@@ -589,16 +614,24 @@ with chat_column:
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
 
-    question = st.chat_input(
-        "例如：RRF 和加权融合有什么区别？",
-        disabled=not has_api_key,
-    )
-    uploaded_chat_image = st.file_uploader(
-        "可选：上传图片，图片描述会随问题一起参与 RAG 检索",
-        type=["jpg", "jpeg", "png", "gif", "webp"],
-        disabled=not has_api_key,
-        key=f"chat_image_{st.session_state.chat_image_uploader_version}",
-    )
+    input_column, image_column = st.columns([6, 1.15], gap="small", vertical_alignment="bottom")
+    with input_column:
+        question = st.chat_input(
+            "例如：RRF 和加权融合有什么区别？",
+            disabled=not has_api_key,
+        )
+    with image_column:
+        with st.container(key="chat_image_popover"):
+            with st.popover("添加图片", use_container_width=True):
+                uploaded_chat_image = st.file_uploader(
+                    "选择参与本次问答的图片",
+                    type=["jpg", "jpeg", "png", "gif", "webp"],
+                    disabled=not has_api_key,
+                    label_visibility="collapsed",
+                    key=f"chat_image_{st.session_state.chat_image_uploader_version}",
+                )
+                if uploaded_chat_image:
+                    st.caption(uploaded_chat_image.name)
 
     if question:
         if not uploaded_chat_image and not notes:
@@ -714,11 +747,12 @@ with chat_column:
 
 with focus_column:
     mode_now = "快速模式（Agentic RAG）" if st.session_state.get("retrieval_mode", "fast") == "fast" else "精确查找（Step RAG）"
-    with st.expander(f"本次复习 · {mode_now}", expanded=False):
-        st.caption(
-            "Agent 自主判断是否检索，适合日常复习。"
-            if st.session_state.get("retrieval_mode", "fast") == "fast"
-            else "执行查询改写、双路召回、RRF 与精排，适合准确查找。"
-        )
-        st.markdown("<div class='mini-step'><b>01 · 导入资料</b><small>按 Markdown 标题切分并建立索引</small></div>", unsafe_allow_html=True)
-        st.markdown("<div class='mini-step'><b>02 · 基于来源问答</b><small>检索、精排后再生成回答</small></div>", unsafe_allow_html=True)
+    mode_summary = (
+        "Agent 自主判断是否检索；需要资料时调用向量检索，适合日常复习。"
+        if st.session_state.get("retrieval_mode", "fast") == "fast"
+        else "执行查询改写、双路召回、RRF 与精排，适合准确查找。"
+    )
+    st.markdown(
+        f"<div class='focus-card'><strong>本次复习 · {mode_now}</strong><span>{mode_summary}</span></div>",
+        unsafe_allow_html=True,
+    )
