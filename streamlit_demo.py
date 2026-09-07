@@ -236,13 +236,13 @@ st.markdown(
     h1, h2, h3 {
         color: var(--ink); letter-spacing: -0.035em;
     }
-    .block-container { max-width: 1260px; padding-top: .65rem; padding-bottom: 1.5rem; }
+    .block-container { max-width: 1260px; padding-top: .35rem; padding-bottom: 1rem; }
     /* 压缩 st.navigation 顶部导航与内容之间的留白，让页面更紧凑 */
     [data-testid="stNavigation"] { padding: 0 !important; margin: 0 !important; }
     [data-testid="stToolbar"] .rc-overflow {
         justify-content: center !important; padding-left: 250px !important; box-sizing: border-box;
     }
-    [data-testid="stMain"] { padding-top: 0.4rem !important; }
+    [data-testid="stMain"] { padding-top: 0.15rem !important; }
     .app-brand {
         position: fixed; top: .72rem; left: max(1.4rem, calc(50vw - 620px)); z-index: 1000001;
         display: flex; align-items: center; gap: .5rem;
@@ -250,7 +250,7 @@ st.markdown(
     }
     .brand-logo { flex: 0 0 auto; }
     .brand-text { color: #184d38; }
-    .page-heading { margin: .45rem 0 .65rem; }
+    .page-heading { margin: .2rem 0 .45rem; }
     .page-heading h1 { font-size: 1.75rem; margin: 0 0 .12rem; }
     .page-heading p { color: var(--muted); margin: 0; }
     .dashboard-stat {
@@ -400,13 +400,16 @@ if "confirm_delete_all" not in st.session_state:
     st.session_state.confirm_delete_all = False
 
 def has_valid_api_key() -> bool:
-    current_key = st.session_state.deepseek_api_key.strip()
-    return bool(current_key) and st.session_state.validated_api_key == current_key
+    current_key = st.session_state.get("deepseek_api_key", "").strip()
+    validated_key = st.session_state.get("validated_api_key", "")
+    return bool(current_key) and validated_key == current_key
 
 
 def clear_api_key() -> None:
     st.session_state.deepseek_api_key = ""
     st.session_state.validated_api_key = ""
+    if "api_key_input" in st.session_state:
+        st.session_state.api_key_input = ""
 
 
 def render_settings_page() -> None:
@@ -414,6 +417,8 @@ def render_settings_page() -> None:
         "<div class='page-heading'><h1>设置</h1><p>配置当前浏览器会话使用的模型访问凭据。</p></div>",
         unsafe_allow_html=True,
     )
+    if "api_key_input" not in st.session_state:
+        st.session_state.api_key_input = st.session_state.deepseek_api_key
     _, settings_column, _ = st.columns([1.1, 1.5, 1.1])
     with settings_column:
         with st.container(border=True):
@@ -421,13 +426,14 @@ def render_settings_page() -> None:
             st.text_input(
                 "API Key",
                 type="password",
-                key="deepseek_api_key",
+                key="api_key_input",
                 placeholder="请输入 DeepSeek API Key",
                 help="仅保存在当前浏览器会话，并随单次请求发送。",
             )
             save_column, clear_column = st.columns(2)
             if save_column.button("保存并验证", type="primary", use_container_width=True):
-                if not st.session_state.deepseek_api_key.strip():
+                candidate_key = st.session_state.api_key_input.strip()
+                if not candidate_key:
                     st.session_state.validated_api_key = ""
                     st.warning("请先输入 API Key")
                 elif validate_deepseek_api_key is None:
@@ -435,8 +441,9 @@ def render_settings_page() -> None:
                     st.error("当前环境缺少 Key 验证组件，请先部署最新代码后重试。")
                 else:
                     try:
-                        asyncio.run(validate_deepseek_api_key(st.session_state.deepseek_api_key.strip()))
-                        st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
+                        asyncio.run(validate_deepseek_api_key(candidate_key))
+                        st.session_state.deepseek_api_key = candidate_key
+                        st.session_state.validated_api_key = candidate_key
                         st.success("已保存，当前会话内有效")
                     except ImageProcessingError as error:
                         st.session_state.validated_api_key = ""
@@ -473,15 +480,16 @@ def render_about_page() -> None:
 
 
 def render_library_page() -> None:
-    has_api_key = has_valid_api_key()
-    notes = list_notes()
-    existing_note_names = {note["file_name"] for note in notes}
     st.markdown(
         "<div class='page-heading'><h1>知识库</h1><p>集中导入、查看和管理用于检索的学习资料。</p></div>",
         unsafe_allow_html=True,
     )
-    if not has_api_key:
+    if not has_valid_api_key():
         st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
+        return
+    has_api_key = True
+    notes = list_notes()
+    existing_note_names = {note["file_name"] for note in notes}
     st.markdown("### 导入资料")
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
@@ -594,17 +602,16 @@ def render_library_page() -> None:
 
 
 def render_dashboard_page() -> None:
-    if not has_valid_api_key():
-        st.warning("请先在「设置」页填写并验证 DeepSeek API Key，验证通过后即可查看数据看板。")
-        return
-    notes = list_notes()
-    note_count = len(notes)
-    chunk_count = sum(int(note.get("chunk_count", 0)) for note in notes)
-
     st.markdown(
         "<div class='page-heading'><h1>数据看板</h1><p>查看知识库的笔记规模、片段分布与资料类型。</p></div>",
         unsafe_allow_html=True,
     )
+    if not has_valid_api_key():
+        st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
+        return
+    notes = list_notes()
+    note_count = len(notes)
+    chunk_count = sum(int(note.get("chunk_count", 0)) for note in notes)
 
     note_column, chunk_column = st.columns(2, gap="medium")
     note_column.markdown(
@@ -726,9 +733,15 @@ if current_page == "关于":
     st.stop()
 
 has_api_key = has_valid_api_key()
-notes = list_notes()
 if not has_api_key:
-    st.warning("请先在顶部导航的「设置」页填写并验证 DeepSeek API Key，完成后即可开始提问。")
+    st.markdown(
+        "<div class='page-heading'><h1>智能问答</h1><p>围绕已导入的笔记进行检索与问答。</p></div>",
+        unsafe_allow_html=True,
+    )
+    st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
+    st.stop()
+
+notes = list_notes()
 
 # ---------------------------------------------------------------------------
 # 主区域
@@ -793,7 +806,7 @@ with chat_column:
         unsafe_allow_html=True,
     )
 
-    chat_history = st.container(height=420, border=True)
+    chat_history = st.container(height=330, border=True)
 
     with chat_history:
         if not notes:
