@@ -85,7 +85,7 @@ flowchart LR
 | 混合检索 | `bm25_retriever.py` / `rrf_fusion.py` | 中文关键词召回与排名融合 |
 | 精排 | `backend/app/services/reranker.py` | `BAAI/bge-reranker-base` Cross-Encoder 精排 |
 | 向量存储 | `backend/app/storage/vector_store.py` | DashScope Embedding 和 Chroma 持久化 |
-| 前端 | `frontend/app.py` | 导入、模式切换、SSE 解析、来源卡片和耗时展示 |
+| 前端 | `streamlit_demo.py` | 导入、模式切换、来源卡片、数据看板和耗时展示 |
 | 回归评测 | `eval_10questions.py` | 双模式逐题请求、规则判定和 Markdown 报告生成 |
 
 ## 回归评测
@@ -100,6 +100,23 @@ flowchart LR
 | 精确查找 | 9 | 9/9 | 无 |
 
 完整逐题结果见 [`eval_result_20260824_010958.md`](eval_result_20260824_010958.md)。这里的 `9/9` 表示当前规则命中，不等同于答案准确率、召回率或生产环境指标；单次耗时也会受到网络、模型缓存和 API 状态影响。
+
+### 三层评测（最新，`eval_rag.py`）
+
+`eval_rag.py` 做「检索层 + 生成层 + 应用层」三层评测：固定 31 道题（覆盖 Git/Docker/Linux/Maven/Vue + 拒答边界题，分 easy/medium/hard 三档难度），对快速 / 精确两种模式各问一遍，自动判定 Recall@3、MRR、拒答和延迟；忠实度用 DeepSeek 作裁判（LLM-as-judge，仅作定性参考）。
+
+一次本机评测快照（2026-09-08）：
+
+| 模式 | Recall@3 | MRR | 拒答 | 平均延迟 |
+| --- | ---: | ---: | ---: | ---: |
+| 快速模式 | 28/28 | 1.0 | 2/3 | ~3.6s |
+| 精确查找 | 28/28 | 0.982 | 3/3 | ~13.2s |
+
+**按难度分层**（来源命中题）：两种模式在 easy / medium / hard 三档均为满分（easy 5/5、medium 18/18、hard 5/5）。
+
+**说明**：31 题里 28 道为「来源命中」题、3 道为「应拒答」题。两种模式的来源命中（Recall@3）均满分；拒答上精确模式 3/3 正确、快速模式 2/3（有 1 题未按预期拒答，如实记录）。延迟符合「快速≈快、精确≈慢（更准）」的双模式取舍设计。忠实度由 LLM 裁判评估、分数波动较大，仅作定性参考，不视为生产指标。
+
+> 均为本地固定题集、小规模、人工复核，不等同于线上生产指标。
 
 ### 这份结果如何跑出来
 
@@ -177,7 +194,7 @@ uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 第二个 PowerShell：
 
 ```powershell
-uv run streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 8501
+uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 8501
 ```
 
 访问地址：
@@ -225,7 +242,8 @@ Personal_Notes_Review_Assistant/
 │     ├─ schemas/             # 请求/响应 DTO
 │     ├─ services/            # 切分、检索、融合、精排、Agent、生成
 │     └─ storage/             # Chroma 与 Embedding
-├─ frontend/app.py            # Streamlit 前端
+├─ streamlit_demo.py          # 本地与 Streamlit Cloud 共用的 Streamlit 前端
+├─ frontend/app.py            # FastAPI 分离部署版前端（保留）
 ├─ tests/                     # 工程烟雾测试
 ├─ docs/images/               # README 展示图片
 ├─ eval_10questions.py        # 双模式回归脚本

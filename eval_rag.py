@@ -50,15 +50,45 @@ JUDGE_MODEL = "deepseek-v4-flash"
 #   any          -> 人工判断，不参与自动统计
 # ============================================================
 DATASET = [
-    {"q": "介绍一下 Git 的常用命令", "expect": "file:Git.md", "note": ""},
-    {"q": "Git 的分支有什么用？", "expect": "file:Git.md", "note": ""},
-    {"q": "Docker 里怎么部署 MySQL？", "expect": "file:Docker.md", "note": ""},
-    {"q": "Linux 有哪些常用命令？", "expect": "file:Linux.md", "note": ""},
-    {"q": "Maven 的依赖管理是怎么回事？", "expect": "file:Maven高级.md", "note": ""},
-    {"q": "什么是 Docker 镜像？", "expect": "file:Docker.md", "note": ""},
-    {"q": "介绍一下 MySQL", "expect": "refuse", "note": "笔记库无 MySQL，应拒答"},
-    {"q": "什么是操作系统？", "expect": "any", "note": "人工判断"},
+    # ---- Git.md（8题, 难度分级）----
+    {"q": "Git 是什么？", "expect": "file:Git.md", "difficulty": "easy", "note": "Git 定义"},
+    {"q": "Git 的作用有哪些？", "expect": "file:Git.md", "difficulty": "easy", "note": "代码回溯等"},
+    {"q": "Git 的本地仓库和远程仓库有什么区别？", "expect": "file:Git.md", "difficulty": "medium", "note": "本地/远程仓库"},
+    {"q": "Git 里 commit、push、pull 分别做什么？", "expect": "file:Git.md", "difficulty": "medium", "note": "三个命令"},
+    {"q": "为什么要设置 Git 的全局用户名称和邮箱？", "expect": "file:Git.md", "difficulty": "medium", "note": "每次提交记录"},
+    {"q": "Git 里分支的作用是什么？", "expect": "file:Git.md", "difficulty": "medium", "note": "分支"},
+    {"q": "Git 是用来管理哪类文件的？", "expect": "file:Git.md", "difficulty": "easy", "note": "源代码文件"},
+    {"q": "Git 相比传统代码管理有什么优势？", "expect": "file:Git.md", "difficulty": "hard", "note": "回溯/协作/备份"},
+    # ---- Docker.md（6题）----
+    {"q": "Docker 是什么？", "expect": "file:Docker.md", "difficulty": "easy", "note": "Docker 概念"},
+    {"q": "用 Docker 部署 MySQL 的一条命令是什么？", "expect": "file:Docker.md", "difficulty": "medium", "note": "docker run mysql"},
+    {"q": "Docker 的镜像和容器分别是什么？", "expect": "file:Docker.md", "difficulty": "medium", "note": "image/container"},
+    {"q": "为什么用 Docker 部署比传统方式高效？", "expect": "file:Docker.md", "difficulty": "hard", "note": "快/隔离"},
+    {"q": "Docker 的镜像包含哪些内容？", "expect": "file:Docker.md", "difficulty": "medium", "note": "环境/配置/函数库"},
+    {"q": "为什么在企业开发中要用 Docker？", "expect": "file:Docker.md", "difficulty": "hard", "note": "部署/迁移"},
+    # ---- Linux.md（6题）----
+    {"q": "Linux 系统分为哪些版本？", "expect": "file:Linux.md", "difficulty": "medium", "note": "内核版/发行版"},
+    {"q": "为什么 javaEE 开发要学 Linux？", "expect": "file:Linux.md", "difficulty": "medium", "note": "服务端部署"},
+    {"q": "Linux 的内核版和发行版有什么区别？", "expect": "file:Linux.md", "difficulty": "medium", "note": "内核/发行"},
+    {"q": "企业里开发人员怎么操作 Linux 上的软件？", "expect": "file:Linux.md", "difficulty": "medium", "note": "远程工具"},
+    {"q": "哪些中间件常安装在 Linux 上？", "expect": "file:Linux.md", "difficulty": "medium", "note": "MySQL/Redis/MQ"},
+    {"q": "作为服务端开发，Linux 为什么必不可少？", "expect": "file:Linux.md", "difficulty": "hard", "note": "用人需求/个人发展"},
+    # ---- Maven高级.md（4题）----
+    {"q": "Maven 分模块设计是什么？", "expect": "file:Maven高级.md", "difficulty": "medium", "note": "分模块"},
+    {"q": "Maven 分模块的常见策略有哪些？", "expect": "file:Maven高级.md", "difficulty": "medium", "note": "三种策略"},
+    {"q": "Maven 的继承是什么？", "expect": "file:Maven高级.md", "difficulty": "medium", "note": "父/子工程"},
+    {"q": "Maven 分模块设计有什么好处？", "expect": "file:Maven高级.md", "difficulty": "hard", "note": "协作/维护"},
+    # ---- Vue.md / vue小结.md（4题）----
+    {"q": "Vue 是什么？", "expect": "file:Vue.md", "difficulty": "easy", "note": "渐进式 JS 框架"},
+    {"q": "Vue 是哪种类型的框架？", "expect": "file:Vue.md", "difficulty": "medium", "note": "构建用户界面"},
+    {"q": "Vue 主要用于构建什么？", "expect": "file:Vue.md", "difficulty": "medium", "note": "用户界面"},
+    {"q": "vue 小结里提到 Vue 的什么特点？", "expect": "file:vue小结.md", "difficulty": "medium", "note": "vue小结"},
+    # ---- 拒答 / 边界（不再"完美"，如实记录可能不拒答）----
+    {"q": "介绍一下 MySQL", "expect": "refuse", "difficulty": "easy", "note": "笔记库无 MySQL，应拒答"},
+    {"q": "什么是 Spring？", "expect": "refuse", "difficulty": "easy", "note": "笔记库无 Spring，应拒答"},
+    {"q": "什么是 Redis？", "expect": "refuse", "difficulty": "easy", "note": "笔记库无 Redis，应拒答"},
 ]
+
 
 
 def parse_sse(resp):
@@ -82,6 +112,7 @@ def parse_sse(resp):
                         {
                             "file": s.get("file_name"),
                             "header": " / ".join(s.get("header_path") or []),
+                            "content": s.get("content_preview") or "",
                         }
                     )
             elif ev == "token":
@@ -185,13 +216,18 @@ def main():
     print("请确认后端已启动。开始三层评测……\n")
 
     rows = []
-    stats = {"fast": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": []},
-             "accurate": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": []}}
+    stats = {"fast": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": [],
+                      "by_diff": {"easy": [0, 0], "medium": [0, 0], "hard": [0, 0]},
+                      "by_diff_hit": {"easy": 0, "medium": 0, "hard": 0}},
+             "accurate": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": [],
+                          "by_diff": {"easy": [0, 0], "medium": [0, 0], "hard": [0, 0]},
+                          "by_diff_hit": {"easy": 0, "medium": 0, "hard": 0}}}
 
     for i, item in enumerate(DATASET, 1):
         q = item["q"]
-        print(f"[{i}/{len(DATASET)}] {q}")
-        row = {"q": q, "expect": item["expect"], "note": item["note"]}
+        diff = item.get("difficulty", "medium")
+        print(f"[{i}/{len(DATASET)}] {q}  ({diff})")
+        row = {"q": q, "expect": item["expect"], "note": item["note"], "difficulty": diff}
         for mode in ("fast", "accurate"):
             try:
                 r = call_chat(q, mode, api_key)
@@ -207,6 +243,10 @@ def main():
                 stats[mode]["recall"][0] += int(recall)
                 if mrr is not None:
                     stats[mode]["mrr"].append(mrr)
+                # 按难度统计
+                stats[mode]["by_diff"][diff][1] += 1
+                stats[mode]["by_diff"][diff][0] += int(recall)
+                stats[mode]["by_diff_hit"][diff] += int(recall)
             # 拒答
             rhit, rj = refuse_metrics(item["expect"], r)
             if rhit is not None:
@@ -216,7 +256,9 @@ def main():
             if r.get("elapsed_ms"):
                 stats[mode]["lat"].append(r["elapsed_ms"])
             # 忠实度
-            source_texts = "".join(f"{s['file']}: {s['header']}\n" for s in r["sources"])
+            source_texts = "\n".join(
+                f"[{s['file']}] {s['header']}\n{s.get('content', '')}" for s in r["sources"]
+            )
             fid = None
             if multi and r["answer"] and r["sources"]:
                 fid, f_detail = faithfulness_score(r["answer"], source_texts, api_key)
@@ -228,7 +270,7 @@ def main():
         rows.append(row)
         print()
 
-    # 汇总
+    # 汇总（按难度分层 + 整体）
     def fmt(s):
         r = s["recall"]
         rec = f"{r[0]}/{r[1]}" if r[1] else "-"
@@ -236,7 +278,14 @@ def main():
         rf = s["refuse"]
         ref = f"{rf[0]}/{rf[1]}" if rf[1] else "-"
         lat = f"{round(mean(s['lat']))}ms" if s["lat"] else "-"
-        return f"Recall@3={rec}, MRR={mrr}, 拒答={ref}, 平均延迟={lat}"
+        # 按难度分层
+        diff_parts = []
+        for d in ("easy", "medium", "hard"):
+            dd = s["by_diff"][d]
+            if dd[1]:
+                diff_parts.append(f"{d}:{dd[0]}/{dd[1]}")
+        diff_str = ", ".join(diff_parts) if diff_parts else "-"
+        return f"Recall@3={rec}, MRR={mrr}, 拒答={ref}, 延迟={lat} | 按难度: {diff_str}"
 
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = f"eval_rag_result_{now}.md"
@@ -244,29 +293,37 @@ def main():
         "# RAG 三层评估结果（自动生成）",
         "",
         f"> 生成时间：{now} ｜ 命令：python eval_rag.py ｜ 忠实度评分：{'开' if multi else '关'}",
-        f"> 覆盖 {len(DATASET)} 题；检索层与拒答为自动判定，忠实度为 LLM 评审，最终请人工复核。",
+        f"> 覆盖 {len(DATASET)} 题（含 easy/medium/hard 难度分层）；检索层与拒答为自动判定，忠实度为 LLM 评审，最终请人工复核。",
         "",
-        "| # | 问题 | 期望 | 快速·Recall | 快速·拒答 | 精确·Recall | 精确·拒答 |",
-        "|---|---|---|---|---|---|---|",
+        "### 逐题结果",
+        "",
+        "| # | 难度 | 问题 | 期望 | 快速·Recall | 快速·拒答 | 精确·Recall | 精确·拒答 |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for i, row in enumerate(rows, 1):
         def cell(mode):
             r = row.get(mode)
             if not r or "err" in r:
-                return "失败", "失败", "失败", "失败"
-            rec, _, rd = retrieval_metrics(row["expect"], r)
-            rh, rj = refuse_metrics(row["expect"], r)
-            return (str(rec) if rec is not None else "-", rj, str(rec) if rec is not None else "-", rj)
-        f_rec, f_rj, a_rec, a_rj = cell("fast"), cell("accurate")
+                return "失败", "失败"
+            rec, _, _ = retrieval_metrics(row["expect"], r)
+            _, rj = refuse_metrics(row["expect"], r)
+            return (str(rec) if rec is not None else "-", rj)
+        f_rec, f_rj = cell("fast")
+        a_rec, a_rj = cell("accurate")
         lines.append(
-            f"| {i} | {row['q']} | {row['expect']} | "
+            f"| {i} | {row.get('difficulty','-')} | {row['q']} | {row['expect']} | "
             f"{f_rec} | {f_rj} | {a_rec} | {a_rj} |"
         )
     lines.append("")
-    lines.append("## 汇总")
+    lines.append("### 汇总（按难度分层）")
     lines.append(f"- 快速模式：{fmt(stats['fast'])}")
     lines.append(f"- 精确模式：{fmt(stats['accurate'])}")
     lines.append("")
+    lines.append("### 说明")
+    lines.append("- 检索层用 Recall@3 / MRR 衡量「正确来源是否进入 Top-3、排第几」，只表征**检索质量**，不等于回答准确率。")
+    lines.append("- 拒答指标衡量「资料不足时是否正确拒绝」。")
+    lines.append("- 忠实度为 DeepSeek 裁判打分，波动较大，仅作定性参考。")
+    lines.append("- 均为本地固定题集、小规模、人工复核，不代表线上生产指标。")
     with open(out, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
