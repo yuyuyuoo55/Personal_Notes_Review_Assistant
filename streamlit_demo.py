@@ -236,6 +236,9 @@ st.markdown(
         color: var(--ink); letter-spacing: -0.035em;
     }
     .block-container { max-width: 1260px; padding-top: 1.4rem; padding-bottom: 2rem; }
+    /* 压缩 st.navigation 顶部导航与内容之间的留白，让页面更紧凑 */
+    [data-testid="stNavigation"] { padding: 0 !important; margin: 0 !important; }
+    [data-testid="stMain"] { padding-top: 0.4rem !important; }
     .app-brand { color: #184d38; font-size: 1.38rem; font-weight: 800; padding-top: .2rem; }
     .app-brand span { color: var(--muted); font-size: .8rem; font-weight: 500; margin-left: .65rem; }
     .page-heading { margin: 1.8rem 0 1.15rem; }
@@ -552,7 +555,7 @@ def select_page(page_name: str):
 
 
 st.markdown(
-    "<div class='app-brand'>▣ 笔记复习助手 <span>会话内安全连接</span></div>",
+    "<div class='app-brand'>📚 笔记复习助手 <span>会话内安全连接</span></div>",
     unsafe_allow_html=True,
 )
 navigation = st.navigation(
