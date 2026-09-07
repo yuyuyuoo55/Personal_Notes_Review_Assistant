@@ -831,7 +831,16 @@ with chat_column:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if message["role"] == "assistant":
+                    # 自动展示回答相关的图片（检索命中带图的块时，回答下方直接显示原图）
                     sources = message.get("sources", [])
+                    auto_shown = False
+                    for source in sources:
+                        img = getattr(source, "image_path", None)
+                        if img:
+                            if not auto_shown:
+                                st.markdown("**相关图片**")
+                                auto_shown = True
+                            st.image(img)
                     if sources:
                         with st.expander("参考笔记", expanded=False):
                             for source in sources:
