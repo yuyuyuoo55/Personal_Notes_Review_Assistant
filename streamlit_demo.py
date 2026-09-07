@@ -298,13 +298,6 @@ st.markdown(
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button p {
         font-size: 1.02rem; font-weight: 750;
     }
-    .st-key-chat_image_upload {
-        max-width: 340px; margin-top: -.35rem; margin-bottom: .35rem;
-    }
-    .st-key-chat_image_upload [data-testid="stFileUploader"] {
-        margin-left: 0; margin-right: 0; padding: .18rem .35rem;
-        border-radius: 14px; background: #fffdf9;
-    }
     [data-testid="stChatInput"] {
         height: 3.25rem; min-height: 3.25rem;
         background: #fffdf9; border: 1px solid var(--line); border-radius: 14px;
@@ -360,7 +353,10 @@ st.markdown(
     }
     .empty-card strong, .focus-card strong { display: block; color: var(--ink); margin-bottom: .35rem; }
     .empty-card span, .focus-card span { color: var(--muted); font-size: .9rem; line-height: 1.55; }
-    .focus-card { padding: 1.15rem 1.2rem; box-shadow: 0 12px 30px rgba(51,67,54,.07); }
+    .focus-card {
+        padding: 1.15rem 1.2rem; background: rgba(255,253,249,.92);
+        border-color: #e1ddd3; box-shadow: 0 12px 30px rgba(51,67,54,.07);
+    }
     .focus-card .mode-badge {
         display: inline-flex; margin: .15rem 0 .85rem; padding: .28rem .58rem;
         border-radius: 99px; background: var(--sage); color: #315d45;
@@ -401,14 +397,6 @@ st.markdown(
         .st-key-chat_history [data-testid="stVerticalBlockBorderWrapper"] {
             height: clamp(340px, calc(100vh - 335px), 560px) !important;
         }
-    }
-    @media (prefers-color-scheme: dark) {
-        :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
-            background: #24332d; color: #dce9df; border-color: #52675e;
-        }
-        .st-key-chat_history [data-testid="stVerticalBlockBorderWrapper"],
-        .focus-card { background: rgba(28,38,34,.86); border-color: #43564d !important; }
-        .focus-card .chain-step { background: rgba(79,122,99,.2); }
     }
     </style>
     """,
@@ -889,24 +877,20 @@ with chat_column:
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
 
-    question = st.chat_input(
+    chat_submission = st.chat_input(
         "例如：RRF 和加权融合有什么区别？",
+        accept_file=True,
+        file_type=["jpg", "jpeg", "png", "gif", "webp"],
         disabled=not has_api_key,
     )
-    # Streamlit 不能把文件控件嵌入 chat_input；紧接在下方渲染，形成统一输入区。
-    with st.container(key="chat_image_upload"):
-        uploaded_chat_image = st.file_uploader(
-            "📎 图片",
-            type=["jpg", "jpeg", "png", "gif", "webp"],
-            disabled=not has_api_key,
-            label_visibility="collapsed",
-            key=f"chat_image_{st.session_state.chat_image_uploader_version}",
-        )
-        if uploaded_chat_image:
-            st.caption(f"已选：{uploaded_chat_image.name}")
-            if st.button("移除图片", key="remove_chat_image", use_container_width=True):
-                st.session_state.chat_image_uploader_version += 1
-                st.rerun()
+    question = ""
+    uploaded_chat_image = None
+    if chat_submission:
+        if isinstance(chat_submission, str):
+            question = chat_submission
+        else:
+            question = chat_submission.text
+            uploaded_chat_image = chat_submission.files[0] if chat_submission.files else None
 
     if question:
         if not uploaded_chat_image and not notes:
@@ -1040,8 +1024,6 @@ with chat_column:
                         "elapsed_ms": elapsed_ms,
                     }
                 )
-                if uploaded_chat_image:
-                    st.session_state.chat_image_uploader_version += 1
                 st.rerun()
 
 with focus_column:
