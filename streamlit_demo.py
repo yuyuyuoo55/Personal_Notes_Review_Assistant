@@ -293,14 +293,12 @@ st.markdown(
         background: #eeece7; color: #315d45; border-color: #b8c9bc;
     }
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button { min-height: 2.45rem; }
-    .st-key-chat_image_popover [data-testid="stPopoverButton"] {
-        height: 3.25rem !important; min-height: 3.25rem !important;
-        background: #4e72b8 !important; color: #ffffff !important;
-        border: 1px solid #4e72b8 !important; border-radius: 14px !important;
+    .st-key-chat_image_upload {
+        max-width: 340px; margin-top: -.35rem; margin-bottom: .35rem;
     }
-    .st-key-chat_image_popover [data-testid="stPopoverButton"]:hover {
-        background: #3f62a5 !important; color: #ffffff !important;
-        border-color: #3f62a5 !important;
+    .st-key-chat_image_upload [data-testid="stFileUploader"] {
+        margin-left: 0; margin-right: 0; padding: .18rem .35rem;
+        border-radius: 14px; background: #fffdf9;
     }
     [data-testid="stChatInput"] {
         height: 3.25rem; min-height: 3.25rem;
@@ -373,12 +371,6 @@ st.markdown(
     @media (max-width: 900px) {
         .app-brand span { display: none; }
         [data-testid="stToolbar"] .rc-overflow { padding-left: 180px !important; }
-    }
-    @media (prefers-color-scheme: dark) {
-        .st-key-chat_image_popover [data-testid="stPopoverButton"] {
-            background: #4e72b8 !important; color: #ffffff !important;
-            border-color: #4e72b8 !important;
-        }
     }
     </style>
     """,
@@ -806,7 +798,7 @@ with chat_column:
         unsafe_allow_html=True,
     )
 
-    chat_history = st.container(height=330, border=True)
+    chat_history = st.container(height=650, border=True)
 
     with chat_history:
         if not notes:
@@ -859,27 +851,24 @@ with chat_column:
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
 
-    input_column, image_column = st.columns([6, 1.15], gap="small", vertical_alignment="bottom")
-    with input_column:
-        question = st.chat_input(
-            "例如：RRF 和加权融合有什么区别？",
+    question = st.chat_input(
+        "例如：RRF 和加权融合有什么区别？",
+        disabled=not has_api_key,
+    )
+    # Streamlit 不能把文件控件嵌入 chat_input；紧接在下方渲染，形成统一输入区。
+    with st.container(key="chat_image_upload"):
+        uploaded_chat_image = st.file_uploader(
+            "📎 图片",
+            type=["jpg", "jpeg", "png", "gif", "webp"],
             disabled=not has_api_key,
+            label_visibility="collapsed",
+            key=f"chat_image_{st.session_state.chat_image_uploader_version}",
         )
-    with image_column:
-        # 紧凑的小图标按钮 + 内嵌 file_uploader：选图后显示"已选 + 移除"，不像 popover 那样悬着。
-        with st.container(key="chat_image_popover"):
-            uploaded_chat_image = st.file_uploader(
-                "📎 图片",
-                type=["jpg", "jpeg", "png", "gif", "webp"],
-                disabled=not has_api_key,
-                label_visibility="collapsed",
-                key=f"chat_image_{st.session_state.chat_image_uploader_version}",
-            )
-            if uploaded_chat_image:
-                st.caption(f"已选：{uploaded_chat_image.name}")
-                if st.button("移除图片", key="remove_chat_image", use_container_width=True):
-                    st.session_state.chat_image_uploader_version += 1
-                    st.rerun()
+        if uploaded_chat_image:
+            st.caption(f"已选：{uploaded_chat_image.name}")
+            if st.button("移除图片", key="remove_chat_image", use_container_width=True):
+                st.session_state.chat_image_uploader_version += 1
+                st.rerun()
 
     if question:
         if not uploaded_chat_image and not notes:
