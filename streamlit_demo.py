@@ -496,26 +496,29 @@ def render_library_page() -> None:
         use_container_width=True,
         disabled=not has_api_key or uploaded_file is None or is_duplicate_file,
     ):
-        try:
-            result = import_note(
-                uploaded_file.name,
-                uploaded_file.getvalue(),
-                st.session_state.deepseek_api_key,
-                uploaded_file.type,
-            )
-            image_note = ""
-            if result["image_processed"]:
-                image_note = f" · 已识别 {result['image_processed']} 张图片"
-            elif result["image_skipped"]:
-                image_note = f" · {result['image_skipped']} 张图片未识别，已跳过"
-            st.session_state.note_import_success = (
-                f"已导入 {result['file_name']} · {result['chunk_count']} 个片段{image_note}"
-            )
-            list_notes.clear()
-            st.session_state.note_uploader_version += 1
-            st.rerun()
-        except (ValueError, RuntimeError, ImageProcessingError) as error:
-            st.error(str(error))
+        if uploaded_file is None:
+            st.warning("请先选择一个文件。")
+        else:
+            try:
+                result = import_note(
+                    uploaded_file.name,
+                    uploaded_file.getvalue(),
+                    st.session_state.deepseek_api_key,
+                    uploaded_file.type,
+                )
+                image_note = ""
+                if result["image_processed"]:
+                    image_note = f" · 已识别 {result['image_processed']} 张图片"
+                elif result["image_skipped"]:
+                    image_note = f" · {result['image_skipped']} 张图片未识别，已跳过"
+                st.session_state.note_import_success = (
+                    f"已导入 {result['file_name']} · {result['chunk_count']} 个片段{image_note}"
+                )
+                list_notes.clear()
+                st.session_state.note_uploader_version += 1
+                st.rerun()
+            except (ValueError, RuntimeError, ImageProcessingError) as error:
+                st.error(str(error))
 
     st.divider()
     st.markdown("#### 笔记库")
