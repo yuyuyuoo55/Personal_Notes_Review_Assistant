@@ -834,6 +834,7 @@ with chat_column:
                     # 自动展示回答相关的图片（检索命中带图的块时，回答下方直接显示原图）
                     sources = message.get("sources", [])
                     auto_shown = False
+                    shown_imgs: set[str] = set()
                     for source in sources:
                         img = getattr(source, "image_path", None)
                         if img:
@@ -841,6 +842,7 @@ with chat_column:
                                 st.markdown("**相关图片**")
                                 auto_shown = True
                             st.image(img)
+                            shown_imgs.add(str(img))
                     if sources:
                         with st.expander("参考笔记", expanded=False):
                             for source in sources:
@@ -850,8 +852,9 @@ with chat_column:
                                     unsafe_allow_html=True,
                                 )
                                 st.write(source.content_preview)
-                                if getattr(source, "image_path", None):
-                                    st.image(source.image_path)
+                                img = getattr(source, "image_path", None)
+                                if img and str(img) not in shown_imgs:
+                                    st.image(img)
                                 st.divider()
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
