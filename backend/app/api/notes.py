@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 from pathlib import Path
+from datetime import datetime
 import re
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -198,12 +199,14 @@ def list_notes() -> list[NoteSummary]:
                 chunk_count=len(stored_chunks["ids"]),
                 kind="md",
                 source=str(file_path),
+                imported_at=datetime.fromtimestamp(file_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
             )
         )
 
     seen_doc_ids: set[str] = set()
     for chunk in load_standalone_image_chunks(UPLOAD_DIRECTORY):
         source = Path(str(chunk.metadata["source"]))
+        image_path = Path(str(chunk.metadata.get("image_path", source)))
         doc_id = str(chunk.metadata.get("doc_id", source.stem))
         if doc_id in seen_doc_ids:
             continue
@@ -216,6 +219,7 @@ def list_notes() -> list[NoteSummary]:
                 kind="image",
                 doc_id=doc_id,
                 source=str(source),
+                imported_at=datetime.fromtimestamp(image_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
             )
         )
 

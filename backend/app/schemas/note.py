@@ -20,6 +20,7 @@ class NoteSummary(BaseModel):
     kind: Literal["md", "image"]
     source: str
     doc_id: str | None = None
+    imported_at: str
 
 class SourceChunk(BaseModel):
     """回答引用的一段原始笔记。"""

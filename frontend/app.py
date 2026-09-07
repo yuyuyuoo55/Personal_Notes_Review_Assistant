@@ -3,6 +3,8 @@
 import json
 import os
 import time
+from html import escape
+from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -168,9 +170,22 @@ st.markdown(
     }
     .mini-step b { color: var(--ink); font-size: .88rem; }
     .mini-step small { color: var(--muted); display: block; margin-top: .12rem; }
-    .note-item { background: #ffffff9e; border-radius: 10px; padding: .65rem .7rem; margin: .45rem 0; }
-    .note-item b { font-size: .88rem; color: var(--ink); }
-    .note-item span { display: block; color: var(--muted); font-size: .78rem; margin-top: .12rem; }
+    .library-upload-intro { text-align:center; color:var(--muted); margin:-.2rem 0 .65rem; font-size:.9rem; }
+    .st-key-library_upload_panel { background:rgba(255,253,249,.78); border:1px dashed #aabcae; border-radius:18px; padding:1.15rem 1.3rem .95rem; margin:.25rem 0 1.25rem; }
+    .st-key-library_upload_panel [data-testid="stFileUploader"] { min-height:150px; display:flex; align-items:center; padding:1rem; }
+    .st-key-library_upload_panel [data-testid="stFileUploaderDropzone"] { min-height:118px; justify-content:center; }
+    .st-key-library_upload_panel [data-testid="stFileUploaderDropzoneInstructions"] { text-align:center; }
+    .st-key-library_upload_panel [data-testid="stFileUploaderDropzone"] button { min-height:2.8rem; padding:0 1.35rem; font-weight:750; }
+    .st-key-library_upload_panel [data-testid="stButton"] > button { min-height:3.1rem; font-size:.98rem; }
+    .library-toolbar { display:flex; justify-content:space-between; align-items:end; margin:.2rem 0 .55rem; }
+    .library-toolbar h3 { margin:0; font-size:1.02rem; }
+    .library-toolbar span { color:var(--muted); font-size:.8rem; }
+    .note-item { background:rgba(255,253,249,.9); border:1px solid var(--line); border-radius:13px; padding:.78rem .9rem; margin:.35rem 0; box-shadow:0 4px 14px rgba(62,74,63,.035); }
+    .note-row { display:grid; grid-template-columns:minmax(0,2.4fr) .62fr .8fr 1.05fr; align-items:center; gap:.8rem; }
+    .note-name { min-width:0; font-size:.9rem; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .note-type { justify-self:start; padding:.22rem .5rem; border-radius:6px; border:1px solid #bfd2c1; background:#edf5ee; color:#356148; font-size:.72rem; font-weight:750; }
+    .note-chunks, .note-time { color:var(--muted); font-size:.78rem; white-space:nowrap; }
+    .library-summary { text-align:center; color:var(--muted); font-size:.82rem; margin:.8rem 0 .2rem; }
     .source-label { color: var(--sage-strong); font-size: .82rem; font-weight: 700; }
     .privacy-note { color: var(--muted); font-size: .86rem; text-align: center; margin-top: .8rem; }
     .about-card {
@@ -349,29 +364,23 @@ def render_library_page() -> None:
     )
     if not has_api_key:
         st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
-    st.markdown("### 导入资料")
+    st.markdown("<div class='library-upload-intro'>支持 Markdown / JPG / PNG / WEBP，拖拽文件到此处或点击选择</div>", unsafe_allow_html=True)
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
 
-    uploaded_file = st.file_uploader(
-        "选择 Markdown 或图片文件",
-        type=["md", "jpg", "jpeg", "png", "webp"],
-        disabled=not has_api_key,
-        label_visibility="collapsed",
-        key=f"note_uploader_{st.session_state.note_uploader_version}",
-    )
-    is_duplicate_file = bool(
-        uploaded_file and uploaded_file.name in existing_note_names
-    )
-
-    if is_duplicate_file:
-        st.info(f"{uploaded_file.name} 已在笔记库中，无需重复导入。")
-
-    if st.button(
-        "导入到笔记库",
-        use_container_width=True,
-        disabled=not has_api_key or uploaded_file is None or is_duplicate_file,
-    ):
+    with st.container(key="library_upload_panel"):
+        uploaded_file = st.file_uploader(
+            "选择 Markdown 或图片文件", type=["md", "jpg", "jpeg", "png", "webp"],
+            disabled=not has_api_key, label_visibility="collapsed",
+            key=f"note_uploader_{st.session_state.note_uploader_version}",
+        )
+        is_duplicate_file = bool(
+            uploaded_file and uploaded_file.name in existing_note_names
+        )
+        if is_duplicate_file:
+            st.info(f"{uploaded_file.name} 已在笔记库中，无需重复导入。")
+        import_clicked = st.button("导入文件", use_container_width=True, disabled=not has_api_key or uploaded_file is None or is_duplicate_file)
+    if import_clicked:
         try:
             files = {
                 "file": (
@@ -414,8 +423,7 @@ def render_library_page() -> None:
         except httpx.HTTPError:
             st.error("无法连接后端，请先启动项目")
 
-    st.divider()
-    st.markdown("#### 笔记库")
+    st.markdown(f"<div class='library-toolbar'><h3>已导入文件</h3><span>{len(notes)} 个文件</span></div>", unsafe_allow_html=True)
 
     if notes_load_error:
         st.warning(notes_load_error)
@@ -441,15 +449,18 @@ def render_library_page() -> None:
             st.rerun()
 
         for note in notes:
-            note_col, delete_col = st.columns(
-                [3.6, 1.7], gap="small", vertical_alignment="center"
-            )
+            note_col, delete_col = st.columns([6.2, 1.05], gap="small", vertical_alignment="center")
+            file_type = Path(note["file_name"]).suffix.lstrip(".").upper() or "FILE"
             note_col.markdown(
-                f"<div class='note-item'><b>📄 {note['file_name']}</b><span>{note['chunk_count']} 个知识片段</span></div>",
+                "<div class='note-item'><div class='note-row'>"
+                f"<div class='note-name'>{escape(note['file_name'])}</div>"
+                f"<span class='note-type'>{escape(file_type)}</span>"
+                f"<span class='note-chunks'>{note['chunk_count']} 个片段</span>"
+                f"<span class='note-time'>{escape(note['imported_at'])}</span></div></div>",
                 unsafe_allow_html=True,
             )
             if delete_col.button(
-                "🗑 删除",
+                "删除",
                 key=f"delete_{note['note_id']}",
                 disabled=not has_api_key,
                 use_container_width=True,
@@ -478,6 +489,11 @@ def render_library_page() -> None:
                 ):
                     st.session_state.pending_note_delete = None
                     st.rerun()
+
+        st.markdown(
+            f"<div class='library-summary'>共 {len(notes)} 个文件 · {sum(note['chunk_count'] for note in notes)} 个片段</div>",
+            unsafe_allow_html=True,
+        )
 
 
 current_page = "智能问答"
