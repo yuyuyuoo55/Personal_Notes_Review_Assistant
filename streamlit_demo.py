@@ -64,6 +64,7 @@ except Exception:  # st.secrets 在无 Secrets 文件时抛异常，忽略即可
 # 后端模块（复用，不重写）。
 from backend.app.core.config import UPLOAD_DIRECTORY  # noqa: E402
 from backend.app.services.markdown_image_service import enrich_markdown_images  # noqa: E402
+from backend.app.services.markdown_bundle_service import read_markdown_bundle  # noqa: E402
 from backend.app.services.multimodal_service import (  # noqa: E402
     ImageProcessingError,
     build_image_chunk,
@@ -153,8 +154,15 @@ def import_note(
     """保存笔记、切分、写入 Chroma，并让 RAG 缓存失效（等价后端 import_note）。"""
     suffix = Path(file_name).suffix.lower()
     image_suffixes = {".jpg", ".jpeg", ".png", ".webp"}
-    if suffix not in {".md", *image_suffixes}:
-        raise ValueError("当前只支持 .md、.jpg、.jpeg、.png 或 .webp 格式笔记")
+    if suffix not in {".md", ".zip", *image_suffixes}:
+        raise ValueError("当前只支持 .md、.zip、.jpg、.jpeg、.png 或 .webp 格式笔记")
+    local_images: dict[str, tuple[bytes, str]] | None = None
+    if suffix == ".zip":
+        bundle = read_markdown_bundle(file_content)
+        file_name = bundle.markdown_name
+        file_content = bundle.markdown.encode("utf-8")
+        suffix = ".md"
+        local_images = bundle.local_images
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
     file_path = UPLOAD_DIRECTORY / file_name
     if file_path.exists() or file_name in standalone_image_names(UPLOAD_DIRECTORY):
@@ -198,6 +206,7 @@ def import_note(
         api_key,
         source_path=str(file_path),
         doc_dir=UPLOAD_DIRECTORY / file_path.stem,
+        local_images=local_images,
     ))
     file_path.write_text(image_result.markdown, encoding="utf-8")
 
@@ -529,14 +538,14 @@ def render_library_page() -> None:
     has_api_key = True
     notes = list_notes()
     existing_note_names = {note["file_name"] for note in notes}
-    st.markdown("<div class='library-upload-intro'>支持 Markdown / JPG / PNG / WEBP，拖拽文件到此处或点击选择</div>", unsafe_allow_html=True)
+    st.markdown("<div class='library-upload-intro'>支持 Markdown / ZIP / JPG / PNG / WEBP。文档含图片时，请将图片放入同级 images 文件夹，与 Markdown 一起压缩为 ZIP 后上传。</div>", unsafe_allow_html=True)
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
 
     with st.container(key="library_upload_panel"):
         uploaded_file = st.file_uploader(
-            "选择 Markdown 或图片文件",
-            type=["md", "jpg", "jpeg", "png", "webp"],
+            "选择 Markdown、ZIP 或图片文件",
+            type=["md", "zip", "jpg", "jpeg", "png", "webp"],
             disabled=not has_api_key,
             label_visibility="collapsed",
             key=f"note_uploader_{st.session_state.note_uploader_version}",

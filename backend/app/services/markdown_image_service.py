@@ -8,7 +8,7 @@ import re
 import socket
 from dataclasses import dataclass, field
 from hashlib import sha256
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 import httpx
@@ -122,6 +122,7 @@ async def enrich_markdown_images(
     *,
     source_path: str = "",
     doc_dir: str | Path | None = None,
+    local_images: dict[str, tuple[bytes, str]] | None = None,
 ) -> MarkdownImageResult:
     """逐图增强 Markdown；单图失败只记录安全 warning，不中断文档。"""
     matches = list(MARKDOWN_IMAGE_PATTERN.finditer(markdown))
@@ -139,6 +140,15 @@ async def enrich_markdown_images(
                 image_bytes, mime = _decode_data_uri(source)
             elif source.lower().startswith("https://"):
                 image_bytes, mime = await _download_remote_image(source)
+            elif local_images:
+                normalized_source = source.replace("\\", "/").lstrip("./")
+                bundled_image = local_images.get(normalized_source) or local_images.get(
+                    PurePosixPath(normalized_source).name
+                )
+                if bundled_image is None:
+                    raise ImageProcessingError("压缩包中未找到对应图片，已跳过")
+                image_bytes, mime = bundled_image
+                validate_image(image_bytes, mime)
             else:
                 raise ImageProcessingError("本地图片未随 Markdown 上传，已跳过")
 

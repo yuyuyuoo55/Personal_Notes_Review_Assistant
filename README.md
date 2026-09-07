@@ -1,6 +1,6 @@
 # 个人笔记复习助手
 
-一个面向个人技术笔记的本地 RAG 学习工具。上传 Markdown 或单张图片后，可以用自然语言提问，系统会返回带文件名、章节和原文片段的答案；没有可靠依据时明确拒答。
+一个面向个人技术笔记的本地 RAG 学习工具。上传 Markdown、Markdown 图文 ZIP 或单张图片后，可以用自然语言提问，系统会返回带文件名、章节和原文片段的答案；没有可靠依据时明确拒答。
 
 ![项目主界面](docs/images/project-overview.png)
 
@@ -15,7 +15,7 @@
 - **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
 - **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片也会先转成描述，再参与当前 RAG 模式。
 
-> 当前版本是单机 MVP：支持 `.md`、`.jpg`、`.jpeg`、`.png`、`.webp` 单文件导入；章节小测、批量导入、笔记更新/删除和多用户能力尚未实现。
+> 当前版本是单机 MVP：支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。章节小测、通用批量导入、笔记更新和多用户能力尚未实现。
 
 ## 双模式设计
 
@@ -189,8 +189,9 @@ uv run streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 85
 ### 5. 使用步骤
 
 1. 在侧边栏填写自己的 DeepSeek API Key，点击“验证 Key”；验证通过后控件才会解锁。
-2. 在左侧上传一份非空 `.md` 笔记，或一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片。
-3. 点击“导入到笔记库”，等待图片描述、切分与向量化完成。
+2. 上传一份非空 `.md` 笔记、一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片，或一个包含一份 Markdown 与配套图片的 `.zip`。
+3. 文档包含本地图片时，建议将图片放入 Markdown 同级的 `images/` 目录，并保持 `![说明](images/文件名.png)` 相对路径后整体压缩为 ZIP。
+4. 点击“导入文件”，等待图片描述、切分与向量化完成。旧文档中的本地绝对路径会在 ZIP 内按唯一文件名尝试匹配。
 4. 选择“快速模式”或“精确查找”，输入问题查看回答与来源。
 5. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会把图片描述与问题一起用于当前 RAG 模式。
 
@@ -243,7 +244,7 @@ Personal_Notes_Review_Assistant/
 | --- | --- | --- |
 | `GET` | `/api/health` | 健康检查 |
 | `GET` | `/api/notes` | 查询已导入笔记及片段数 |
-| `POST` | `/api/notes/import` | 上传单个 `.md` 文件，表单字段名为 `file` |
+| `POST` | `/api/notes/import` | 上传 `.md`、图文 `.zip` 或单张图片，表单字段名为 `file` |
 | `POST` | `/api/chat` | SSE 问答；支持 `fast` / `accurate` 模式 |
 | `POST` | `/api/chat/image` | multipart 图片 RAG；字段为 `query`、`image`、`mode` 和 `conversation_id` |
 | `POST` | `/api/key/validate` | 验证请求头中的 DeepSeek Key，不保存 Key |
@@ -266,7 +267,7 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 
 ## 已知边界
 
-- 仅支持单个 Markdown 或单张图片导入，不支持 PDF、批量导入、更新和删除。
+- 支持单个 Markdown、单张图片或“一份 Markdown + 配套图片”的 ZIP；暂不支持 RAR、PDF、通用批量导入和更新。
 - 单个 `.md` 无法携带用户电脑上的本地图片文件；文档图片增强支持公网 HTTPS 图片和 data URI，本地绝对路径会提示后跳过。
 - 本地保存或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
 - 快速模式会话记忆保存在进程内，后端重启后清空。

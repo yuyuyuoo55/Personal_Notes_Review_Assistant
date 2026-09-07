@@ -364,13 +364,13 @@ def render_library_page() -> None:
     )
     if not has_api_key:
         st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
-    st.markdown("<div class='library-upload-intro'>支持 Markdown / JPG / PNG / WEBP，拖拽文件到此处或点击选择</div>", unsafe_allow_html=True)
+    st.markdown("<div class='library-upload-intro'>支持 Markdown / ZIP / JPG / PNG / WEBP。文档含图片时，请将图片放入同级 images 文件夹，与 Markdown 一起压缩为 ZIP 后上传。</div>", unsafe_allow_html=True)
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
 
     with st.container(key="library_upload_panel"):
         uploaded_file = st.file_uploader(
-            "选择 Markdown 或图片文件", type=["md", "jpg", "jpeg", "png", "webp"],
+            "选择 Markdown、ZIP 或图片文件", type=["md", "zip", "jpg", "jpeg", "png", "webp"],
             disabled=not has_api_key, label_visibility="collapsed",
             key=f"note_uploader_{st.session_state.note_uploader_version}",
         )

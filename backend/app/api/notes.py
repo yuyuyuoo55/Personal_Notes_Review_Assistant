@@ -13,6 +13,7 @@ from backend.app.core.config import UPLOAD_DIRECTORY
 from backend.app.schemas.note import ImportResult, NoteSummary
 from backend.app.services.note_loader import load_notes
 from backend.app.services.markdown_image_service import enrich_markdown_images
+from backend.app.services.markdown_bundle_service import read_markdown_bundle
 from backend.app.services.image_chunk_store import (
     load_standalone_image_chunks,
     manifest_path,
@@ -52,28 +53,38 @@ async def import_note(
 
     suffix = Path(file_name).suffix.lower()
     image_suffixes = {".jpg", ".jpeg", ".png", ".webp"}
-    if not file_name or suffix not in {".md", *image_suffixes}:
+    if not file_name or suffix not in {".md", ".zip", *image_suffixes}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="当前只支持 .md、.jpg、.jpeg、.png 或 .webp 格式笔记",
+            detail="当前只支持 .md、.zip、.jpg、.jpeg、.png 或 .webp 格式笔记",
         )
 
     # 3. 保存上传文件。UploadFile.read() 是异步 I/O，所以接口使用 async def。
     UPLOAD_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    file_path = UPLOAD_DIRECTORY / file_name
-
-    if file_path.exists() or file_name in standalone_image_names(UPLOAD_DIRECTORY):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="同名笔记已存在；当前版本不重复导入",
-        )
-
     file_content = await file.read()
 
     if not file_content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="上传文件不能为空",
+        )
+
+    local_images: dict[str, tuple[bytes, str]] | None = None
+    if suffix == ".zip":
+        try:
+            bundle = await run_in_threadpool(read_markdown_bundle, file_content)
+        except ValueError as error:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+        file_name = bundle.markdown_name
+        suffix = ".md"
+        file_content = bundle.markdown.encode("utf-8")
+        local_images = bundle.local_images
+
+    file_path = UPLOAD_DIRECTORY / file_name
+    if file_path.exists() or file_name in standalone_image_names(UPLOAD_DIRECTORY):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="同名笔记已存在；当前版本不重复导入",
         )
 
     doc_dir: Path | None = None
@@ -120,6 +131,7 @@ async def import_note(
             api_key,
             source_path=str(file_path),
             doc_dir=UPLOAD_DIRECTORY / file_path.stem,
+            local_images=local_images,
         )
         await run_in_threadpool(file_path.write_text, image_result.markdown, encoding="utf-8")
 
