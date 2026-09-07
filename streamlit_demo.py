@@ -294,10 +294,14 @@ st.markdown(
     }
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button { min-height: 2.45rem; }
     .st-key-chat_image_popover [data-testid="stPopover"] > button {
-        min-height: 2.9rem; background: #fffdf9; color: #315d45;
-        border: 1px solid #b8c9bc; border-radius: 14px;
+        height: 3.25rem; min-height: 3.25rem; background: #2563eb; color: #ffffff;
+        border: 1px solid #2563eb; border-radius: 14px;
+    }
+    .st-key-chat_image_popover [data-testid="stPopover"] > button:hover {
+        background: #1d4ed8; color: #ffffff; border-color: #1d4ed8;
     }
     [data-testid="stChatInput"] {
+        height: 3.25rem; min-height: 3.25rem;
         background: #fffdf9; border: 1px solid var(--line); border-radius: 14px;
         box-shadow: 0 10px 28px rgba(51, 67, 54, .08);
     }
@@ -370,7 +374,7 @@ st.markdown(
     }
     @media (prefers-color-scheme: dark) {
         .st-key-chat_image_popover [data-testid="stPopover"] > button {
-            background: #2b302d; color: #e6eee8; border-color: #56645a;
+            background: #2563eb; color: #ffffff; border-color: #2563eb;
         }
     }
     </style>
