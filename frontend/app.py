@@ -50,11 +50,17 @@ st.markdown(
     }
     [data-testid="stHeader"] { background: transparent; }
     h1, h2, h3 { color: var(--ink); letter-spacing: -0.035em; }
-    .block-container { max-width: 1260px; padding-top: 1.4rem; padding-bottom: 2rem; }
-    .app-brand { color: #184d38; font-size: 1.38rem; font-weight: 800; padding-top: .2rem; }
+    .block-container { max-width: 1260px; padding-top: .65rem; padding-bottom: 1.5rem; }
+    .app-brand {
+        position: fixed; top: .72rem; left: max(1.4rem, calc(50vw - 620px)); z-index: 1000001;
+        color: #184d38; font-size: 1.25rem; line-height: 2rem; font-weight: 800;
+    }
     .app-brand span { color: var(--muted); font-size: .8rem; font-weight: 500; margin-left: .65rem; }
-    .page-heading { margin: 1.8rem 0 1.15rem; }
-    .page-heading h1 { font-size: 2rem; margin: 0 0 .25rem; }
+    [data-testid="stToolbar"] .rc-overflow {
+        justify-content: center !important; padding-left: 250px !important; box-sizing: border-box;
+    }
+    .page-heading { margin: .45rem 0 .65rem; }
+    .page-heading h1 { font-size: 1.75rem; margin: 0 0 .12rem; }
     .page-heading p { color: var(--muted); margin: 0; }
     [data-testid="stFileUploader"] {
         background: #ffffffb8;
@@ -131,7 +137,7 @@ st.markdown(
         border-radius: 99px; background: var(--sage); color: #426550;
         font-size: .84rem; font-weight: 650;
     }
-    .section-title { color: var(--ink); font-size: 1.12rem; font-weight: 750; margin: .8rem 0 .75rem; }
+    .section-title { color: var(--ink); font-size: 1rem; font-weight: 750; margin: .2rem 0 .38rem; }
     .empty-card, .focus-card {
         background: rgba(255,253,249,.76); border: 1px solid var(--line);
         border-radius: 18px; padding: 1.25rem 1.35rem; margin: .7rem 0;
@@ -157,6 +163,10 @@ st.markdown(
     .tech-chip { display:inline-block; padding:.38rem .65rem; margin:.2rem; border-radius:99px; background:#edf4ed; color:#315d45; font-size:.82rem; }
     .github-link { display:inline-flex; align-items:center; gap:.42rem; margin-top:.45rem; color:#205d43; font-weight:750; text-decoration:none; }
     .github-link:hover { color:#153f2f; text-decoration:underline; }
+    @media (max-width: 900px) {
+        .app-brand span { display: none; }
+        [data-testid="stToolbar"] .rc-overflow { padding-left: 180px !important; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -459,15 +469,15 @@ def select_page(page_name: str):
 
 
 st.markdown(
-    "<div class='app-brand'>▣ 笔记复习助手 <span>会话内安全连接</span></div>",
+    "<div class='app-brand'>笔记复习助手 <span>会话内安全连接</span></div>",
     unsafe_allow_html=True,
 )
 navigation = st.navigation(
     [
-        st.Page(select_page("智能问答"), title="智能问答", icon="💬", url_path="chat", default=True),
-        st.Page(select_page("知识库"), title="知识库", icon="📚", url_path="library"),
-        st.Page(select_page("设置"), title="设置", icon="⚙️", url_path="settings"),
-        st.Page(select_page("关于"), title="关于", icon="ℹ️", url_path="about"),
+        st.Page(select_page("智能问答"), title="智能问答", url_path="chat", default=True),
+        st.Page(select_page("知识库"), title="知识库", url_path="library"),
+        st.Page(select_page("设置"), title="设置", url_path="settings"),
+        st.Page(select_page("关于"), title="关于", url_path="about"),
     ],
     position="top",
 )
@@ -513,7 +523,7 @@ with chat_column:
     fast_column, accurate_column = st.columns(2, gap="small")
     with fast_column:
         if st.button(
-            "⚡ 快速模式\n\nAgentic RAG · Agent 自主检索",
+            "快速模式",
             type="primary" if st.session_state.retrieval_mode == "fast" else "secondary",
             use_container_width=True,
         ):
@@ -527,7 +537,7 @@ with chat_column:
             st.rerun()
     with accurate_column:
         if st.button(
-            "◎ 精确查找\n\nStep RAG · 固定完整链路",
+            "精确查找",
             type="primary" if st.session_state.retrieval_mode == "accurate" else "secondary",
             use_container_width=True,
         ):
@@ -550,7 +560,7 @@ with chat_column:
     )
 
     # 只有问答历史固定在这个独立滚动区域中；侧边栏和右侧复习卡不会跟着滚动。
-    chat_history = st.container(height=500, border=True)
+    chat_history = st.container(height=420, border=True)
 
     with chat_history:
         if not notes:
@@ -703,16 +713,12 @@ with chat_column:
                     answer_placeholder.warning("本次问答暂时无法完成，请稍后重试。")
 
 with focus_column:
-    st.markdown("<div class='section-title'>本次复习</div>", unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="focus-card">
-            <strong>{'当前模式：快速模式（Agentic RAG）' if st.session_state.get('retrieval_mode', 'fast') == 'fast' else '当前模式：精确查找（Step RAG）'}</strong>
-            <span>{'Agent 会自行判断是否检索；需要资料时只调用向量检索，适合日常复习。' if st.session_state.get('retrieval_mode', 'fast') == 'fast' else '固定执行改写、双路召回、RRF 与精排，适合术语和需要准确来源的问题。'}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("<div class='mini-step'><b>01 · 导入资料</b><small>按 Markdown 标题切分并建立索引</small></div>", unsafe_allow_html=True)
-    st.markdown("<div class='mini-step'><b>02 · 基于来源问答</b><small>混合检索、精排后再生成回答</small></div>", unsafe_allow_html=True)
-    st.markdown("<div class='mini-step'><b>03 · 章节小测</b><small>下一阶段开放</small></div>", unsafe_allow_html=True)
+    mode_now = "快速模式（Agentic RAG）" if st.session_state.get("retrieval_mode", "fast") == "fast" else "精确查找（Step RAG）"
+    with st.expander(f"本次复习 · {mode_now}", expanded=False):
+        st.caption(
+            "Agent 自主判断是否检索，适合日常复习。"
+            if st.session_state.get("retrieval_mode", "fast") == "fast"
+            else "执行查询改写、双路召回、RRF 与精排，适合准确查找。"
+        )
+        st.markdown("<div class='mini-step'><b>01 · 导入资料</b><small>按 Markdown 标题切分并建立索引</small></div>", unsafe_allow_html=True)
+        st.markdown("<div class='mini-step'><b>02 · 基于来源问答</b><small>检索、精排后再生成回答</small></div>", unsafe_allow_html=True)
