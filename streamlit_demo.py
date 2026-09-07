@@ -428,8 +428,6 @@ def render_settings_page() -> None:
                         st.session_state.validated_api_key = ""
                         st.error(str(error))
             clear_column.button("清除 Key", use_container_width=True, on_click=clear_api_key)
-            if has_valid_api_key():
-                st.success("已保存，当前会话内有效")
         st.markdown(
             "<div class='privacy-note'>🔒 Key 仅保存在当前浏览器会话中，不会写入数据库或日志。刷新或关闭会话后可能清空。</div>",
             unsafe_allow_html=True,
