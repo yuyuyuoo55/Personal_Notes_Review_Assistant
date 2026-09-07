@@ -249,7 +249,11 @@ st.markdown(
     }
     .brand-logo { flex: 0 0 auto; }
     .brand-text { color: #184d38; }
-    .brand-sub { color: var(--muted); font-size: .8rem; font-weight: 500; }
+    /* "会话内安全连接" 放到右上角 */
+    .brand-sub-right {
+        position: fixed; top: 1rem; right: 1.4rem; z-index: 1000001;
+        color: var(--muted); font-size: .78rem; font-weight: 500;
+    }
     .page-heading { margin: .45rem 0 .65rem; }
     .page-heading h1 { font-size: 1.75rem; margin: 0 0 .12rem; }
     .page-heading p { color: var(--muted); margin: 0; }
@@ -574,8 +578,8 @@ st.markdown(
     "<path d='M11 12h10M11 16h10M11 20h6' stroke='#fff' stroke-width='1.6' stroke-linecap='round'/>"
     "</svg>"
     "<span class='brand-text'>笔记复习助手</span>"
-    "<span class='brand-sub'>会话内安全连接</span>"
-    "</div>",
+    "</div>"
+    "<div class='brand-sub-right'>会话内安全连接</div>",
     unsafe_allow_html=True,
 )
 navigation = st.navigation(
