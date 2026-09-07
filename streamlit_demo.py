@@ -864,7 +864,10 @@ with chat_column:
                     key=f"chat_image_{st.session_state.chat_image_uploader_version}",
                 )
                 if uploaded_chat_image:
-                    st.caption(uploaded_chat_image.name)
+                    st.caption(f"已选：{uploaded_chat_image.name}")
+                    if st.button("移除图片", key="remove_chat_image", use_container_width=True):
+                        st.session_state.chat_image_uploader_version += 1
+                        st.rerun()
 
     if question:
         if not uploaded_chat_image and not notes:
