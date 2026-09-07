@@ -169,7 +169,7 @@ async def enrich_markdown_images(
             }
             metadata.update(_headers_before(markdown, match.start()))
             metadata["chunk_id"] = sha256(
-                f"{source_path}:{local_path}:{description}".encode("utf-8")
+                f"{source_path}:{index}:{source}:{description}".encode("utf-8")
             ).hexdigest()[:16]
             result.image_chunks.append(Document(page_content=description, metadata=metadata))
             result.image_processed += 1

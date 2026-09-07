@@ -32,8 +32,14 @@ def knowledge_to_vector(docs: list[Document]) -> bool:
         logger.warning("没有可写入向量库的文档")
         return False
 
-    # 3. 写入完整 Document；Chroma 会自动向量化正文，并保存 metadata。
-    vector_store.add_documents(docs)
+    # 3. 优先使用切分阶段生成的稳定 chunk_id 作为 Chroma ID。
+    # Streamlit 在网络重连或重复提交时可能再次执行同一批导入；稳定 ID 会执行覆盖更新，
+    # 避免相同片段被写成两份随机 ID 记录。
+    chunk_ids = [str(doc.metadata.get("chunk_id", "")) for doc in docs]
+    if all(chunk_ids):
+        vector_store.add_documents(docs, ids=chunk_ids)
+    else:
+        vector_store.add_documents(docs)
     logger.info(f"已写入 {len(docs)} 个 Chunk 到 Chroma")
     return True
 

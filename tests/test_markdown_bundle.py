@@ -92,3 +92,27 @@ def test_zip_bundle_can_be_imported_through_notes_api(monkeypatch, tmp_path):
     assert response.json()["image_processed"] == 1
     assert response.json()["image_skipped"] == 0
     assert (tmp_path / "HTTP.md").exists()
+
+
+def test_markdown_image_chunk_id_is_stable_across_repeated_processing(monkeypatch, tmp_path):
+    markdown = "# HTTP\n\n![请求图](images/http.png)\n"
+    bundle = read_markdown_bundle(_zip_bytes({
+        "HTTP.md": markdown.encode("utf-8"),
+        "images/http.png": _png_bytes(),
+    }))
+
+    async def fake_describe(image_url, api_key):
+        return "HTTP 请求结构图"
+
+    monkeypatch.setattr(markdown_image_service, "describe_image_url", fake_describe)
+    first = asyncio.run(markdown_image_service.enrich_markdown_images(
+        bundle.markdown, "test-key", source_path=str(tmp_path / "HTTP.md"),
+        doc_dir=tmp_path / "first", local_images=bundle.local_images,
+    ))
+    second = asyncio.run(markdown_image_service.enrich_markdown_images(
+        bundle.markdown, "test-key", source_path=str(tmp_path / "HTTP.md"),
+        doc_dir=tmp_path / "second", local_images=bundle.local_images,
+    ))
+
+    assert first.image_chunks[0].metadata["image_path"] != second.image_chunks[0].metadata["image_path"]
+    assert first.image_chunks[0].metadata["chunk_id"] == second.image_chunks[0].metadata["chunk_id"]

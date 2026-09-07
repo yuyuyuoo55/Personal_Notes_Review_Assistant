@@ -28,6 +28,13 @@ if "confirm_delete_all" not in st.session_state:
     st.session_state.confirm_delete_all = False
 if "note_uploader_version" not in st.session_state:
     st.session_state.note_uploader_version = 0
+if "note_import_in_progress" not in st.session_state:
+    st.session_state.note_import_in_progress = False
+
+
+def begin_note_import() -> None:
+    """Lock the import action before the processing rerun starts."""
+    st.session_state.note_import_in_progress = True
 
 st.markdown(
     """
@@ -367,6 +374,8 @@ def render_library_page() -> None:
     st.markdown("<div class='library-upload-intro'>支持 Markdown / ZIP / JPG / PNG / WEBP。文档含图片时，请将图片放入同级 images 文件夹，与 Markdown 一起压缩为 ZIP 后上传。</div>", unsafe_allow_html=True)
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
+    if "note_import_error" in st.session_state:
+        st.error(st.session_state.pop("note_import_error"))
 
     with st.container(key="library_upload_panel"):
         uploaded_file = st.file_uploader(
@@ -379,8 +388,21 @@ def render_library_page() -> None:
         )
         if is_duplicate_file:
             st.info(f"{uploaded_file.name} 已在笔记库中，无需重复导入。")
-        import_clicked = st.button("导入文件", use_container_width=True, disabled=not has_api_key or uploaded_file is None or is_duplicate_file)
-    if import_clicked:
+        is_zip_file = bool(uploaded_file and uploaded_file.name.lower().endswith(".zip"))
+        if is_zip_file:
+            st.info("ZIP 中的图片需要逐张识别，导入可能需要几分钟。开始后请勿刷新页面或重复点击。")
+        st.button(
+            "正在导入…" if st.session_state.note_import_in_progress else "导入文件",
+            use_container_width=True,
+            disabled=(
+                not has_api_key
+                or uploaded_file is None
+                or is_duplicate_file
+                or st.session_state.note_import_in_progress
+            ),
+            on_click=begin_note_import,
+        )
+    if st.session_state.note_import_in_progress:
         try:
             files = {
                 "file": (
@@ -389,12 +411,21 @@ def render_library_page() -> None:
                     uploaded_file.type or "application/octet-stream",
                 )
             }
-            response = httpx.post(
-                f"{API_BASE_URL}/api/notes/import",
-                files=files,
-                headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
-                timeout=120,
+            import_message = (
+                "正在上传 ZIP、逐张识别图片并建立索引，请勿刷新页面…"
+                if is_zip_file
+                else "正在导入文档、识别图片并建立索引，请勿关闭页面…"
             )
+            with st.spinner(
+                import_message,
+                show_time=True,
+            ):
+                response = httpx.post(
+                    f"{API_BASE_URL}/api/notes/import",
+                    files=files,
+                    headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
+                    timeout=120,
+                )
             response.raise_for_status()
             result = response.json()
             st.session_state.note_import_success = (
@@ -411,6 +442,7 @@ def render_library_page() -> None:
                 )
             get_notes.clear()
             st.session_state.note_uploader_version += 1
+            st.session_state.note_import_in_progress = False
             st.rerun()
         except httpx.HTTPStatusError as error:
             # 后端可能返回 JSON 业务错误，也可能在异常时返回空响应或 HTML。
@@ -419,9 +451,13 @@ def render_library_page() -> None:
                 detail = error.response.json().get("detail", "笔记导入失败")
             except ValueError:
                 detail = f"笔记导入失败（后端状态码：{error.response.status_code}）"
-            st.error(detail)
+            st.session_state.note_import_error = detail
+            st.session_state.note_import_in_progress = False
+            st.rerun()
         except httpx.HTTPError:
-            st.error("无法连接后端，请先启动项目")
+            st.session_state.note_import_error = "无法连接后端，请先启动项目"
+            st.session_state.note_import_in_progress = False
+            st.rerun()
 
     st.markdown(f"<div class='library-toolbar'><h3>已导入文件</h3><span>{len(notes)} 个文件</span></div>", unsafe_allow_html=True)
 

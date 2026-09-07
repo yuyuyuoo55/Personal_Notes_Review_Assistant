@@ -436,6 +436,13 @@ st.markdown(
 
 if "note_uploader_version" not in st.session_state:
     st.session_state.note_uploader_version = 0
+if "note_import_in_progress" not in st.session_state:
+    st.session_state.note_import_in_progress = False
+
+
+def begin_note_import() -> None:
+    """Lock the import action before the processing rerun starts."""
+    st.session_state.note_import_in_progress = True
 if "deepseek_api_key" not in st.session_state:
     st.session_state.deepseek_api_key = ""
 if "validated_api_key" not in st.session_state:
@@ -541,6 +548,8 @@ def render_library_page() -> None:
     st.markdown("<div class='library-upload-intro'>支持 Markdown / ZIP / JPG / PNG / WEBP。文档含图片时，请将图片放入同级 images 文件夹，与 Markdown 一起压缩为 ZIP 后上传。</div>", unsafe_allow_html=True)
     if "note_import_success" in st.session_state:
         st.success(st.session_state.pop("note_import_success"))
+    if "note_import_error" in st.session_state:
+        st.error(st.session_state.pop("note_import_error"))
 
     with st.container(key="library_upload_panel"):
         uploaded_file = st.file_uploader(
@@ -553,22 +562,42 @@ def render_library_page() -> None:
         is_duplicate_file = bool(uploaded_file and uploaded_file.name in existing_note_names)
         if is_duplicate_file:
             st.info(f"{uploaded_file.name} 已在笔记库中，无需重复导入。")
-        import_clicked = st.button(
-            "导入文件",
+        is_zip_file = bool(uploaded_file and uploaded_file.name.lower().endswith(".zip"))
+        if is_zip_file:
+            st.info("ZIP 中的图片需要逐张识别，导入可能需要几分钟。开始后请勿刷新页面或重复点击。")
+        st.button(
+            "正在导入…" if st.session_state.note_import_in_progress else "导入文件",
             use_container_width=True,
-            disabled=not has_api_key or uploaded_file is None or is_duplicate_file,
+            disabled=(
+                not has_api_key
+                or uploaded_file is None
+                or is_duplicate_file
+                or st.session_state.note_import_in_progress
+            ),
+            on_click=begin_note_import,
         )
-    if import_clicked:
+    if st.session_state.note_import_in_progress:
         if uploaded_file is None:
-            st.warning("请先选择一个文件。")
+            st.session_state.note_import_error = "请先选择一个文件。"
+            st.session_state.note_import_in_progress = False
+            st.rerun()
         else:
             try:
-                result = import_note(
-                    uploaded_file.name,
-                    uploaded_file.getvalue(),
-                    st.session_state.deepseek_api_key,
-                    uploaded_file.type,
+                import_message = (
+                    "正在读取 ZIP、逐张识别图片并建立索引，请勿刷新页面…"
+                    if is_zip_file
+                    else "正在导入文档、识别图片并建立索引，请勿关闭页面…"
                 )
+                with st.spinner(
+                    import_message,
+                    show_time=True,
+                ):
+                    result = import_note(
+                        uploaded_file.name,
+                        uploaded_file.getvalue(),
+                        st.session_state.deepseek_api_key,
+                        uploaded_file.type,
+                    )
                 image_note = ""
                 if result["image_processed"]:
                     image_note = f" · 已识别 {result['image_processed']} 张图片"
@@ -579,9 +608,12 @@ def render_library_page() -> None:
                 )
                 list_notes.clear()
                 st.session_state.note_uploader_version += 1
+                st.session_state.note_import_in_progress = False
                 st.rerun()
             except (ValueError, RuntimeError, ImageProcessingError) as error:
-                st.error(str(error))
+                st.session_state.note_import_error = str(error)
+                st.session_state.note_import_in_progress = False
+                st.rerun()
 
     st.markdown(
         f"<div class='library-toolbar'><h3>已导入文件</h3><span>{len(notes)} 个文件</span></div>",
