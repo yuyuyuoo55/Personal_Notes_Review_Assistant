@@ -36,6 +36,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st  # noqa: E402
+import plotly.graph_objects as go  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 部署者密钥注入：仅加载 DashScope/OSS 等后端配置。
@@ -252,6 +253,12 @@ st.markdown(
     .page-heading { margin: .45rem 0 .65rem; }
     .page-heading h1 { font-size: 1.75rem; margin: 0 0 .12rem; }
     .page-heading p { color: var(--muted); margin: 0; }
+    .dashboard-stat {
+        padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 14px;
+        background: rgba(255,253,249,.76); box-shadow: 0 8px 24px rgba(51,67,54,.05);
+    }
+    .dashboard-stat span { display: block; color: var(--muted); margin-bottom: .2rem; }
+    .dashboard-stat strong { color: var(--sage-strong); font-size: 2rem; line-height: 1.15; }
     [data-testid="stFileUploader"] {
         background: #ffffffb8; border: 1px dashed #9db9a6; border-radius: 12px;
         padding: .3rem .45rem; max-width: 340px; margin-left: auto; margin-right: auto;
@@ -576,6 +583,89 @@ def render_library_page() -> None:
                     st.rerun()
 
 
+def render_dashboard_page() -> None:
+    notes = list_notes()
+    note_count = len(notes)
+    chunk_count = sum(int(note.get("chunk_count", 0)) for note in notes)
+
+    st.markdown(
+        "<div class='page-heading'><h1>数据看板</h1><p>查看知识库的笔记规模、片段分布与资料类型。</p></div>",
+        unsafe_allow_html=True,
+    )
+
+    note_column, chunk_column = st.columns(2, gap="medium")
+    note_column.markdown(
+        f"<div class='dashboard-stat'><span>总笔记数</span><strong>{note_count}</strong></div>",
+        unsafe_allow_html=True,
+    )
+    chunk_column.markdown(
+        f"<div class='dashboard-stat'><span>总片段数</span><strong>{chunk_count}</strong></div>",
+        unsafe_allow_html=True,
+    )
+
+    if not notes:
+        st.info("暂无数据，导入笔记后即可查看统计图表。")
+        return
+
+    chart_left, chart_right = st.columns([1.7, 1], gap="large")
+    sorted_notes = sorted(notes, key=lambda note: int(note.get("chunk_count", 0)), reverse=True)
+    file_names = [str(note.get("file_name", "未命名笔记")) for note in sorted_notes]
+    chunk_counts = [int(note.get("chunk_count", 0)) for note in sorted_notes]
+
+    with chart_left:
+        st.markdown("### 各笔记片段数")
+        bar_figure = go.Figure(
+            go.Bar(
+                x=file_names,
+                y=chunk_counts,
+                marker_color="#4f7a63",
+                hovertemplate="%{x}<br>%{y} 个片段<extra></extra>",
+            )
+        )
+        bar_figure.update_layout(
+            height=360,
+            margin=dict(l=12, r=12, t=12, b=72),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(255,253,249,.62)",
+            showlegend=False,
+            xaxis_title=None,
+            yaxis_title="片段数",
+            font=dict(color="#203047"),
+        )
+        bar_figure.update_xaxes(tickangle=-25, gridcolor="rgba(0,0,0,0)")
+        bar_figure.update_yaxes(rangemode="tozero", gridcolor="#e9e2d7")
+        st.plotly_chart(bar_figure, use_container_width=True, config={"displayModeBar": False})
+
+    type_labels = {"md": "Markdown", "image": "图片"}
+    type_counts: dict[str, int] = {}
+    for note in notes:
+        kind = str(note.get("kind") or "other")
+        type_counts[kind] = type_counts.get(kind, 0) + 1
+
+    with chart_right:
+        st.markdown("### 文档类型占比")
+        kinds = list(type_counts)
+        pie_figure = go.Figure(
+            go.Pie(
+                labels=[type_labels.get(kind, kind.upper()) for kind in kinds],
+                values=[type_counts[kind] for kind in kinds],
+                hole=.58,
+                marker=dict(colors=["#4f7a63", "#c76d4a", "#d4b56a", "#718096"]),
+                textinfo="label+percent",
+                hovertemplate="%{label}<br>%{value} 份 · %{percent}<extra></extra>",
+            )
+        )
+        pie_figure.update_layout(
+            height=360,
+            margin=dict(l=12, r=12, t=12, b=12),
+            paper_bgcolor="rgba(0,0,0,0)",
+            showlegend=False,
+            font=dict(color="#203047"),
+            annotations=[dict(text=f"{note_count} 份", x=.5, y=.5, showarrow=False)],
+        )
+        st.plotly_chart(pie_figure, use_container_width=True, config={"displayModeBar": False})
+
+
 current_page = "智能问答"
 
 
@@ -601,6 +691,7 @@ navigation = st.navigation(
     [
         st.Page(select_page("智能问答"), title="智能问答", url_path="chat", default=True),
         st.Page(select_page("知识库"), title="知识库", url_path="library"),
+        st.Page(select_page("数据看板"), title="数据看板", icon="📊", url_path="dashboard"),
         st.Page(select_page("设置"), title="设置", url_path="settings"),
         st.Page(select_page("关于"), title="关于", url_path="about"),
     ],
@@ -610,6 +701,9 @@ navigation.run()
 
 if current_page == "知识库":
     render_library_page()
+    st.stop()
+if current_page == "数据看板":
+    render_dashboard_page()
     st.stop()
 if current_page == "设置":
     render_settings_page()
