@@ -279,6 +279,8 @@ def has_valid_api_key() -> bool:
 def clear_api_key() -> None:
     st.session_state.deepseek_api_key = ""
     st.session_state.validated_api_key = ""
+    if "api_key_input" in st.session_state:
+        st.session_state.api_key_input = ""
 
 
 def render_settings_page() -> None:
@@ -286,6 +288,8 @@ def render_settings_page() -> None:
         "<div class='page-heading'><h1>设置</h1><p>配置当前浏览器会话使用的模型访问凭据。</p></div>",
         unsafe_allow_html=True,
     )
+    if "api_key_input" not in st.session_state:
+        st.session_state.api_key_input = st.session_state.deepseek_api_key
     _, settings_column, _ = st.columns([1.1, 1.5, 1.1])
     with settings_column:
         with st.container(border=True):
@@ -293,29 +297,28 @@ def render_settings_page() -> None:
             st.text_input(
                 "API Key",
                 type="password",
-                key="deepseek_api_key",
+                key="api_key_input",
                 placeholder="请输入 DeepSeek API Key",
                 help="仅保存在当前浏览器会话，并随单次请求发送。",
             )
             save_column, clear_column = st.columns(2)
             if save_column.button("保存并验证", type="primary", use_container_width=True):
-                if not st.session_state.deepseek_api_key.strip():
+                candidate_key = st.session_state.api_key_input.strip()
+                if not candidate_key:
                     st.session_state.validated_api_key = ""
                     st.warning("请先输入 API Key")
                 else:
                     try:
                         response = httpx.post(
                             f"{API_BASE_URL}/api/key/validate",
-                            headers={
-                                DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key.strip()
-                            },
+                            headers={DEEPSEEK_API_KEY_HEADER: candidate_key},
                             timeout=30,
                         )
                         response.raise_for_status()
                         result = response.json()
                         if result.get("valid"):
-                            st.session_state.validated_api_key = st.session_state.deepseek_api_key.strip()
-                            st.success("已保存，当前会话内有效")
+                            st.session_state.deepseek_api_key = candidate_key
+                            st.session_state.validated_api_key = candidate_key
                         else:
                             st.session_state.validated_api_key = ""
                             st.error(result.get("message", "API Key 验证失败"))

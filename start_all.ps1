@@ -29,7 +29,7 @@ function Start-LocalService {
 }
 
 Start-LocalService -Port 8000 -Name 'backend' -Command 'uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000'
-Start-LocalService -Port 8501 -Name 'frontend' -Command 'uv run streamlit run frontend/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true'
+Start-LocalService -Port 8501 -Name 'frontend' -Command 'uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 8501 --server.headless true'
 
 $frontendUrl = 'http://127.0.0.1:8501'
 Write-Host "Project started. Opening: $frontendUrl"

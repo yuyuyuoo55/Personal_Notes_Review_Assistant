@@ -18,3 +18,21 @@ push_err.txt
 .pytest_tmp/
 .tmp_verify/
 _verify_mm.py
+
+# 个人隐私 / 本地文件，不要进仓库
+*.pdf
+_read_resume.py
+logo_preview.html
+
+# 给 codex 的临时任务提示词 / 过程记录（内部使用，不走仓库）
+UI微调任务.md
+UI细节优化任务.md
+bug修复提示词.md
+数据看板任务.md
+问答页布局任务.md
+问答页美化任务.md
+页面紧凑任务.md
+design-qa.md
+findings.md
+progress.md
+task_plan.md
