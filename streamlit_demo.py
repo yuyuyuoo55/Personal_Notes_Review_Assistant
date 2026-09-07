@@ -689,11 +689,11 @@ st.markdown(
 )
 navigation = st.navigation(
     [
-        st.Page(select_page("智能问答"), title="智能问答", url_path="chat", default=True),
-        st.Page(select_page("知识库"), title="知识库", url_path="library"),
+        st.Page(select_page("智能问答"), title="智能问答", icon="💬", url_path="chat", default=True),
+        st.Page(select_page("知识库"), title="知识库", icon="📚", url_path="library"),
         st.Page(select_page("数据看板"), title="数据看板", icon="📊", url_path="dashboard"),
-        st.Page(select_page("设置"), title="设置", url_path="settings"),
-        st.Page(select_page("关于"), title="关于", url_path="about"),
+        st.Page(select_page("设置"), title="设置", icon="⚙️", url_path="settings"),
+        st.Page(select_page("关于"), title="关于", icon="ℹ️", url_path="about"),
     ],
     position="top",
 )
