@@ -244,9 +244,12 @@ st.markdown(
     [data-testid="stMain"] { padding-top: 0.4rem !important; }
     .app-brand {
         position: fixed; top: .72rem; left: max(1.4rem, calc(50vw - 620px)); z-index: 1000001;
+        display: flex; align-items: center; gap: .5rem;
         color: #184d38; font-size: 1.25rem; line-height: 2rem; font-weight: 800;
     }
-    .app-brand span { color: var(--muted); font-size: .8rem; font-weight: 500; margin-left: .65rem; }
+    .brand-logo { flex: 0 0 auto; }
+    .brand-text { color: #184d38; }
+    .brand-sub { color: var(--muted); font-size: .8rem; font-weight: 500; }
     .page-heading { margin: .45rem 0 .65rem; }
     .page-heading h1 { font-size: 1.75rem; margin: 0 0 .12rem; }
     .page-heading p { color: var(--muted); margin: 0; }
@@ -565,7 +568,14 @@ def select_page(page_name: str):
 
 
 st.markdown(
-    "<div class='app-brand'>笔记复习助手 <span>会话内安全连接</span></div>",
+    "<div class='app-brand'>"
+    "<svg class='brand-logo' width='26' height='26' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'>"
+    "<rect x='6' y='5' width='20' height='24' rx='3' fill='#184d38'/>"
+    "<path d='M11 12h10M11 16h10M11 20h6' stroke='#fff' stroke-width='1.6' stroke-linecap='round'/>"
+    "</svg>"
+    "<span class='brand-text'>笔记复习助手</span>"
+    "<span class='brand-sub'>会话内安全连接</span>"
+    "</div>",
     unsafe_allow_html=True,
 )
 navigation = st.navigation(
