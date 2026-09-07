@@ -273,11 +273,17 @@ st.markdown(
         background: #426b55; border-color: #426b55;
     }
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"] {
-        background: #fffdf9; color: #203047; border: 1px solid #7fa08b;
-        box-shadow: 0 2px 8px rgba(32, 48, 71, .08);
+        background: #4f8066; color: #ffffff; border: 1px solid #4f8066;
+        box-shadow: 0 3px 10px rgba(49, 93, 69, .16);
+    }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"]:hover {
+        background: #426f58; color: #ffffff; border-color: #426f58;
     }
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
-        background: #ecebea; color: #4f5965; border: 1px solid #d7d4cf;
+        background: #f7f6f2; color: #4f5965; border: 1px solid #d7d4cf;
+    }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"]:hover {
+        background: #eeece7; color: #315d45; border-color: #b8c9bc;
     }
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button { min-height: 2.45rem; }
     .st-key-chat_image_popover [data-testid="stPopover"] > button {
@@ -356,12 +362,6 @@ st.markdown(
         [data-testid="stToolbar"] .rc-overflow { padding-left: 180px !important; }
     }
     @media (prefers-color-scheme: dark) {
-        :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"] {
-            background: #3a4540; color: #f6faf7; border-color: #8eb69a;
-        }
-        :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
-            background: #24282d; color: #bdc4ca; border-color: #424850;
-        }
         .st-key-chat_image_popover [data-testid="stPopover"] > button {
             background: #2b302d; color: #e6eee8; border-color: #56645a;
         }
