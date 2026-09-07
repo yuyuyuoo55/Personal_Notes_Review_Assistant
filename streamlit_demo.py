@@ -292,7 +292,12 @@ st.markdown(
     :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"]:hover {
         background: #eeece7; color: #315d45; border-color: #b8c9bc;
     }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button { min-height: 2.45rem; }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button {
+        min-height: 3.2rem; border-radius: 14px; font-size: 1.02rem;
+    }
+    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button p {
+        font-size: 1.02rem; font-weight: 750;
+    }
     .st-key-chat_image_upload {
         max-width: 340px; margin-top: -.35rem; margin-bottom: .35rem;
     }
@@ -306,6 +311,12 @@ st.markdown(
         box-shadow: 0 10px 28px rgba(51, 67, 54, .08);
     }
     [data-testid="stChatInput"] textarea { color: var(--ink); }
+    .st-key-chat_history [data-testid="stVerticalBlockBorderWrapper"] {
+        height: clamp(360px, calc(100vh - 355px), 680px) !important;
+        min-height: 360px; border-color: rgba(79,122,99,.22) !important;
+        border-radius: 18px !important; background: rgba(255,253,249,.68);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 10px 30px rgba(51,67,54,.05);
+    }
     .mode-card {
         min-height: 5.5rem; padding: .85rem 1rem; border: 1px solid var(--line);
         border-radius: 14px; background: rgba(255,253,249,.72); margin: .1rem 0 .8rem;
@@ -349,6 +360,22 @@ st.markdown(
     }
     .empty-card strong, .focus-card strong { display: block; color: var(--ink); margin-bottom: .35rem; }
     .empty-card span, .focus-card span { color: var(--muted); font-size: .9rem; line-height: 1.55; }
+    .focus-card { padding: 1.15rem 1.2rem; box-shadow: 0 12px 30px rgba(51,67,54,.07); }
+    .focus-card .mode-badge {
+        display: inline-flex; margin: .15rem 0 .85rem; padding: .28rem .58rem;
+        border-radius: 99px; background: var(--sage); color: #315d45;
+        font-size: .76rem; font-weight: 750;
+    }
+    .focus-card .detail-label {
+        color: var(--sage-strong); font-size: .78rem; font-weight: 800;
+        letter-spacing: .06em; margin: .7rem 0 .22rem;
+    }
+    .focus-card .chain-step {
+        color: var(--ink); font-size: .86rem; line-height: 1.55;
+        padding: .55rem .65rem; border-radius: 10px; background: rgba(220,233,223,.48);
+    }
+    .focus-card ul { margin: .3rem 0 0; padding-left: 1.15rem; }
+    .focus-card li { color: var(--muted); font-size: .84rem; line-height: 1.55; margin-bottom: .2rem; }
     .mini-step {
         background: #fffdf9; border-left: 3px solid #8eb69a;
         padding: .72rem .8rem; margin: .65rem 0; border-radius: 0 10px 10px 0;
@@ -371,6 +398,17 @@ st.markdown(
     @media (max-width: 900px) {
         .app-brand span { display: none; }
         [data-testid="stToolbar"] .rc-overflow { padding-left: 180px !important; }
+        .st-key-chat_history [data-testid="stVerticalBlockBorderWrapper"] {
+            height: clamp(340px, calc(100vh - 335px), 560px) !important;
+        }
+    }
+    @media (prefers-color-scheme: dark) {
+        :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
+            background: #24332d; color: #dce9df; border-color: #52675e;
+        }
+        .st-key-chat_history [data-testid="stVerticalBlockBorderWrapper"],
+        .focus-card { background: rgba(28,38,34,.86); border-color: #43564d !important; }
+        .focus-card .chain-step { background: rgba(79,122,99,.2); }
     }
     </style>
     """,
@@ -761,7 +799,7 @@ with chat_column:
     fast_column, accurate_column = st.columns(2, gap="small")
     with fast_column:
         if st.button(
-            "快速模式",
+            "⚡ 快速模式",
             key="mode_fast",
             type="primary" if st.session_state.retrieval_mode == "fast" else "secondary",
             use_container_width=True,
@@ -775,7 +813,7 @@ with chat_column:
             st.rerun()
     with accurate_column:
         if st.button(
-            "精确查找",
+            "🎯 精确查找",
             key="mode_accurate",
             type="primary" if st.session_state.retrieval_mode == "accurate" else "secondary",
             use_container_width=True,
@@ -798,7 +836,7 @@ with chat_column:
         unsafe_allow_html=True,
     )
 
-    chat_history = st.container(height=650, border=True)
+    chat_history = st.container(height=500, border=True, key="chat_history")
 
     with chat_history:
         if not notes:
@@ -1007,13 +1045,30 @@ with chat_column:
                 st.rerun()
 
 with focus_column:
-    mode_now = "快速模式（Agentic RAG）" if st.session_state.get("retrieval_mode", "fast") == "fast" else "精确查找（Step RAG）"
-    mode_summary = (
-        "Agent 自主判断是否检索；需要资料时调用向量检索，适合日常复习。"
-        if st.session_state.get("retrieval_mode", "fast") == "fast"
-        else "执行查询改写、双路召回与 RRF 融合；云端自动跳过本地精排模型。"
-    )
+    if st.session_state.get("retrieval_mode", "fast") == "fast":
+        mode_now = "快速模式 · Agentic RAG"
+        mode_icon = "⚡"
+        mode_chain = "Agent 判断 → 按需向量检索 Top-3 → 基于片段回答"
+        mode_scenarios = ["日常复习与普通追问", "希望更快得到回答的短对话"]
+        mode_features = ["延迟通常更低", "弱关键词或精确术语可能漏召回"]
+    else:
+        mode_now = "精确查找 · Step RAG"
+        mode_icon = "🎯"
+        mode_chain = "查询改写 → 向量 Top-6 + BM25 Top-6 → RRF 融合 → Cross-Encoder 精排 Top-3 → 回答"
+        mode_scenarios = ["术语、命令与原文定位", "需要更稳定召回和准确来源"]
+        mode_features = ["召回更全面，耗时通常更高", "云端无精排模型时自动降级为 RRF Top-3"]
     st.markdown(
-        f"<div class='focus-card'><strong>本次复习 · {mode_now}</strong><span>{mode_summary}</span></div>",
+        f"""
+        <div class='focus-card'>
+            <strong>当前链路详解</strong>
+            <div class='mode-badge'>{mode_icon} {mode_now}</div>
+            <div class='detail-label'>完整链路</div>
+            <div class='chain-step'>{mode_chain}</div>
+            <div class='detail-label'>适用场景</div>
+            <ul>{''.join(f'<li>{item}</li>' for item in mode_scenarios)}</ul>
+            <div class='detail-label'>特点</div>
+            <ul>{''.join(f'<li>{item}</li>' for item in mode_features)}</ul>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
