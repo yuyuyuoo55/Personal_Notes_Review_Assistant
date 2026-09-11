@@ -8,6 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![Tests](https://img.shields.io/badge/tests-30%20passed-4f7a63)](#测试与验证)
+[![License](https://img.shields.io/badge/license-MIT-d0a64a)](LICENSE)
 
 上传 Markdown、图文 ZIP 或单张图片，用自然语言复习自己的资料。回答会附带来源文件、章节和原文片段；检索不到可靠依据时明确拒答。
 
@@ -349,3 +350,7 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 - 上传前请先移除笔记中的姓名、账号、公司内部信息等隐私内容。
 - 模型问答与向量化会调用外部 API；敏感资料不应直接导入。
 - 项目不联网搜索补充答案，但模型服务本身仍是外部依赖。
+
+## License
+
+本项目采用 [MIT License](LICENSE)。
