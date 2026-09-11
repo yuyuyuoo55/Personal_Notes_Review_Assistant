@@ -417,6 +417,14 @@ st.markdown(
     .library-summary { text-align:center; color:var(--muted); font-size:.82rem; margin:.8rem 0 .2rem; }
     .source-label { color: var(--sage-strong); font-size: .82rem; font-weight: 700; }
     .privacy-note { color: var(--muted); font-size: .86rem; text-align: center; margin-top: .8rem; }
+    .balance-strip {
+        display:flex; align-items:center; justify-content:space-between; gap:1rem;
+        margin-top:.7rem; padding:.82rem 1rem; border:1px solid #cfe0d3; border-radius:12px;
+        background:linear-gradient(135deg, #f3f8f2 0%, #edf5ef 100%);
+    }
+    .balance-label { display:flex; align-items:center; gap:.5rem; color:#52665a; font-size:.9rem; font-weight:650; }
+    .balance-label::before { content:""; width:7px; height:7px; border-radius:50%; background:#4f876b; box-shadow:0 0 0 4px rgba(79,135,107,.12); }
+    .balance-value { color:#184d38; font-size:1.15rem; line-height:1; font-weight:750; letter-spacing:-.01em; font-variant-numeric:tabular-nums; }
     .about-card {
         max-width: 820px; margin: 1.4rem auto; background: rgba(255,253,249,.86);
         border: 1px solid var(--line); border-radius: 22px; padding: 2rem 2.2rem;
@@ -472,6 +480,17 @@ def clear_api_key() -> None:
     st.session_state.pop("deepseek_balance", None)
 
 
+def render_balance(balance: dict) -> None:
+    currency = str(balance.get("currency", ""))
+    symbol = {"CNY": "¥", "USD": "$"}.get(currency, f"{escape(currency)} ")
+    amount = escape(str(balance.get("total_balance", "--")))
+    st.markdown(
+        f"<div class='balance-strip'><span class='balance-label'>当前余额</span>"
+        f"<span class='balance-value'>{symbol}{amount}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_settings_page() -> None:
     st.markdown(
         "<div class='page-heading'><h1>设置</h1><p>配置当前浏览器会话使用的模型访问凭据。</p></div>",
@@ -522,7 +541,7 @@ def render_settings_page() -> None:
                         st.error(str(error))
                 balance = st.session_state.get("deepseek_balance")
                 if balance:
-                    st.metric("当前余额", f"{balance['total_balance']} {balance['currency']}")
+                    render_balance(balance)
         st.markdown(
             "<div class='privacy-note'>🔒 Key 仅保存在当前浏览器会话中，不会写入数据库或日志。刷新或关闭会话后可能清空。</div>",
             unsafe_allow_html=True,
