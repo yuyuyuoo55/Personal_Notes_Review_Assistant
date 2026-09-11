@@ -272,11 +272,23 @@ st.markdown(
     .page-heading h1 { font-size: 1.75rem; margin: 0 0 .12rem; }
     .page-heading p { color: var(--muted); margin: 0; }
     .dashboard-stat {
-        padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 14px;
-        background: rgba(255,253,249,.76); box-shadow: 0 8px 24px rgba(51,67,54,.05);
+        position:relative; overflow:hidden; min-height:112px; padding:1rem 1.15rem;
+        border:1px solid var(--line); border-radius:16px;
+        background:rgba(255,253,249,.86); box-shadow:0 10px 28px rgba(51,67,54,.06);
     }
-    .dashboard-stat span { display: block; color: var(--muted); margin-bottom: .2rem; }
-    .dashboard-stat strong { color: var(--sage-strong); font-size: 2rem; line-height: 1.15; }
+    .dashboard-stat::before { content:""; position:absolute; inset:0 auto 0 0; width:5px; }
+    .dashboard-stat::after { content:""; position:absolute; width:90px; height:90px; border-radius:50%; right:-28px; top:-34px; opacity:.16; }
+    .dashboard-stat .stat-label { display:flex; align-items:center; gap:.45rem; color:var(--muted); margin-bottom:.28rem; font-size:.9rem; font-weight:650; }
+    .dashboard-stat strong { font-size:2rem; line-height:1.15; font-variant-numeric:tabular-nums; }
+    .dashboard-stat.note-stat::before, .dashboard-stat.note-stat::after { background:#4f7a63; }
+    .dashboard-stat.note-stat strong { color:#3f7058; }
+    .dashboard-stat.chunk-stat::before, .dashboard-stat.chunk-stat::after { background:#597fa5; }
+    .dashboard-stat.chunk-stat strong { color:#456f98; }
+    :is(.st-key-dashboard_bar_card, .st-key-dashboard_type_card) {
+        background:rgba(255,253,249,.82); border:1px solid var(--line); border-radius:18px;
+        box-shadow:0 12px 30px rgba(51,67,54,.055); padding:.25rem .85rem .55rem;
+    }
+    :is(.st-key-dashboard_bar_card, .st-key-dashboard_type_card) h3 { font-size:1.08rem; margin:.45rem 0 0; }
     [data-testid="stFileUploader"] {
         background: #ffffffb8; border: 1px dashed #9db9a6; border-radius: 12px;
         padding: .3rem .45rem; max-width: 340px; margin-left: auto; margin-right: auto;
@@ -744,11 +756,11 @@ def render_dashboard_page() -> None:
 
     note_column, chunk_column = st.columns(2, gap="medium")
     note_column.markdown(
-        f"<div class='dashboard-stat'><span>总笔记数</span><strong>{note_count}</strong></div>",
+        f"<div class='dashboard-stat note-stat'><span class='stat-label'>📚 总笔记数</span><strong>{note_count}</strong></div>",
         unsafe_allow_html=True,
     )
     chunk_column.markdown(
-        f"<div class='dashboard-stat'><span>总片段数</span><strong>{chunk_count}</strong></div>",
+        f"<div class='dashboard-stat chunk-stat'><span class='stat-label'>🧩 总片段数</span><strong>{chunk_count}</strong></div>",
         unsafe_allow_html=True,
     )
 
@@ -761,29 +773,38 @@ def render_dashboard_page() -> None:
     file_names = [str(note.get("file_name", "未命名笔记")) for note in sorted_notes]
     chunk_counts = [int(note.get("chunk_count", 0)) for note in sorted_notes]
 
+    chart_colors = ["#4f7a63", "#597fa5", "#c8754f", "#8a72a6", "#d0a64a", "#4c8f91"]
+
     with chart_left:
-        st.markdown("### 各笔记片段数")
-        bar_figure = go.Figure(
-            go.Bar(
-                x=file_names,
-                y=chunk_counts,
-                marker_color="#4f7a63",
-                hovertemplate="%{x}<br>%{y} 个片段<extra></extra>",
+        with st.container(border=True, key="dashboard_bar_card"):
+            st.markdown("### 各笔记片段数")
+            bar_figure = go.Figure(
+                go.Bar(
+                    x=file_names,
+                    y=chunk_counts,
+                    marker=dict(
+                        color=[chart_colors[index % len(chart_colors)] for index in range(len(file_names))],
+                        line=dict(color="rgba(255,255,255,.72)", width=1),
+                    ),
+                    text=chunk_counts,
+                    textposition="outside",
+                    cliponaxis=False,
+                    hovertemplate="%{x}<br>%{y} 个片段<extra></extra>",
+                )
             )
-        )
-        bar_figure.update_layout(
-            height=360,
-            margin=dict(l=12, r=12, t=12, b=72),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(255,253,249,.62)",
-            showlegend=False,
-            xaxis_title=None,
-            yaxis_title="片段数",
-            font=dict(color="#203047"),
-        )
-        bar_figure.update_xaxes(tickangle=-25, gridcolor="rgba(0,0,0,0)")
-        bar_figure.update_yaxes(rangemode="tozero", gridcolor="#e9e2d7")
-        st.plotly_chart(bar_figure, use_container_width=True, config={"displayModeBar": False})
+            bar_figure.update_layout(
+                height=360,
+                margin=dict(l=12, r=12, t=12, b=72),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+                xaxis_title=None,
+                yaxis_title="片段数",
+                font=dict(color="#203047"),
+            )
+            bar_figure.update_xaxes(tickangle=-20, gridcolor="rgba(0,0,0,0)", linecolor="#e4ded4")
+            bar_figure.update_yaxes(rangemode="tozero", gridcolor="#ece6dc", zeroline=False)
+            st.plotly_chart(bar_figure, use_container_width=True, config={"displayModeBar": False})
 
     type_labels = {"md": "Markdown", "image": "图片"}
     type_counts: dict[str, int] = {}
@@ -791,28 +812,33 @@ def render_dashboard_page() -> None:
         kind = str(note.get("kind") or "other")
         type_counts[kind] = type_counts.get(kind, 0) + 1
 
+    type_colors = {"md": "#4f7a63", "image": "#c8754f", "zip": "#597fa5", "other": "#8a72a6"}
     with chart_right:
-        st.markdown("### 文档类型占比")
-        kinds = list(type_counts)
-        pie_figure = go.Figure(
-            go.Pie(
-                labels=[type_labels.get(kind, kind.upper()) for kind in kinds],
-                values=[type_counts[kind] for kind in kinds],
-                hole=.58,
-                marker=dict(colors=["#4f7a63", "#c76d4a", "#d4b56a", "#718096"]),
-                textinfo="label+percent",
-                hovertemplate="%{label}<br>%{value} 份 · %{percent}<extra></extra>",
+        with st.container(border=True, key="dashboard_type_card"):
+            st.markdown("### 文档类型占比")
+            kinds = list(type_counts)
+            pie_figure = go.Figure(
+                go.Pie(
+                    labels=[type_labels.get(kind, kind.upper()) for kind in kinds],
+                    values=[type_counts[kind] for kind in kinds],
+                    hole=.58,
+                    marker=dict(
+                        colors=[type_colors.get(kind, chart_colors[index % len(chart_colors)]) for index, kind in enumerate(kinds)],
+                        line=dict(color="#fffdfa", width=3),
+                    ),
+                    textinfo="label+percent",
+                    hovertemplate="%{label}<br>%{value} 份 · %{percent}<extra></extra>",
+                )
             )
-        )
-        pie_figure.update_layout(
-            height=360,
-            margin=dict(l=12, r=12, t=12, b=12),
-            paper_bgcolor="rgba(0,0,0,0)",
-            showlegend=False,
-            font=dict(color="#203047"),
-            annotations=[dict(text=f"{note_count} 份", x=.5, y=.5, showarrow=False)],
-        )
-        st.plotly_chart(pie_figure, use_container_width=True, config={"displayModeBar": False})
+            pie_figure.update_layout(
+                height=360,
+                margin=dict(l=12, r=12, t=12, b=12),
+                paper_bgcolor="rgba(0,0,0,0)",
+                showlegend=False,
+                font=dict(color="#203047"),
+                annotations=[dict(text=f"{note_count} 份", x=.5, y=.5, showarrow=False)],
+            )
+            st.plotly_chart(pie_figure, use_container_width=True, config={"displayModeBar": False})
 
 
 current_page = "智能问答"
