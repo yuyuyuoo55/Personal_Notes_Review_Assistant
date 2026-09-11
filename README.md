@@ -1,8 +1,23 @@
+<div align="center">
+
 # 个人笔记复习助手
 
-一个面向个人技术笔记的本地 RAG 学习工具。上传 Markdown、Markdown 图文 ZIP 或单张图片后，可以用自然语言提问，系统会返回带文件名、章节和原文片段的答案；没有可靠依据时明确拒答。
+**把 Markdown 和图片笔记变成一个可检索、可追溯、会拒答的个人知识库。**
+
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Tests](https://img.shields.io/badge/tests-30%20passed-4f7a63)](#测试与验证)
+
+上传 Markdown、图文 ZIP 或单张图片，用自然语言复习自己的资料。回答会附带来源文件、章节和原文片段；检索不到可靠依据时明确拒答。
+
+[核心能力](#项目亮点) · [快速开始](#快速开始) · [技术架构](#技术架构) · [回归评测](#回归评测) · [API](#api) · [已知边界](#已知边界)
+
+</div>
 
 ![项目主界面](docs/images/project-overview.png)
+
+> 这是一个可本地运行的个人学习型 MVP，不是企业级知识库平台。用户 DeepSeek Key 仅在当前会话和单次请求中使用；笔记、索引和日志默认保存在本机且不提交 Git。
 
 ## 项目亮点
 
@@ -15,8 +30,9 @@
 - **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
 - **余额查询**：Key 验证通过后，每次进入设置页会自动查询并显示当前 DeepSeek 总余额。
 - **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片也会先转成描述，再参与当前 RAG 模式。
+- **知识库数据看板**：展示笔记总数、片段总数、各笔记片段分布和文档类型占比，并使用多色编码区分数据。
 
-> 当前版本是单机 MVP：支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。章节小测、通用批量导入、笔记更新和多用户能力尚未实现。
+当前支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。章节小测、通用批量导入、笔记更新和多用户能力尚未实现。
 
 ## 双模式设计
 
@@ -26,6 +42,38 @@
 | 精确查找 `accurate` | 查询改写 → 向量 Top-6 + BM25 Top-6 → RRF → Cross-Encoder → Top-3 → 生成 | 术语查找、命令定位、强调来源的问题 | 召回更稳，但首次需下载精排模型，耗时更高 |
 
 快速模式具有进程内会话记忆；精确模式每次固定执行完整链路，不使用会话记忆。
+
+## 页面功能
+
+| 页面 | 主要功能 |
+| --- | --- |
+| 智能问答 | 快速/精确模式切换、文本或图片提问、流式回答、来源追溯和耗时展示 |
+| 知识库 | 导入 Markdown、图文 ZIP 或单张图片，查看文件类型、导入时间和片段数，支持删除与清空 |
+| 数据看板 | 查看笔记规模、片段分布和文档类型占比 |
+| 设置 | 在当前会话内验证或清除 DeepSeek Key，并自动显示当前总余额 |
+| 关于 | 查看项目定位、技术栈和开源地址 |
+
+## 快速开始
+
+环境要求：Windows 10/11、Python `3.12.x`、[uv](https://docs.astral.sh/uv/)，并可访问 DeepSeek、DashScope 和 Hugging Face。
+
+```powershell
+git clone https://github.com/yuyuyuoo55/Personal_Notes_Review_Assistant.git
+cd Personal_Notes_Review_Assistant
+uv venv --python 3.12
+uv pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+在 `.env` 中至少配置 Embedding Key：
+
+```dotenv
+DASHSCOPE_API_KEY=YOUR_API_KEY_HERE
+```
+
+然后双击 `启动项目.cmd`。浏览器打开后，进入“设置”填写并验证自己的 DeepSeek Key，再到“知识库”导入资料。
+
+> DeepSeek Key 不写入 `.env`。完整的手动启动、可选精排和模型后备说明见[完整安装与运行](#完整安装与运行)。
 
 ## 技术架构
 
@@ -78,7 +126,7 @@ flowchart LR
 
 | 模块 | 文件 | 负责内容 |
 | --- | --- | --- |
-| API 入口 | `backend/app/main.py` | 注册健康检查、笔记和问答路由 |
+| API 入口 | `backend/app/main.py` | 注册健康检查、笔记、问答、Key 与余额路由 |
 | 笔记导入 | `backend/app/api/notes.py` | 上传校验、保存、切分、向量化与失败回滚 |
 | 双模式编排 | `backend/app/services/rag_service.py` | 快速/精确分流、阈值判断、混合检索与生成 |
 | 快速 Agent | `backend/app/services/agent_service.py` | 工具调用、向量 Top-3、会话记忆和流式事件 |
@@ -86,7 +134,8 @@ flowchart LR
 | 混合检索 | `bm25_retriever.py` / `rrf_fusion.py` | 中文关键词召回与排名融合 |
 | 精排 | `backend/app/services/reranker.py` | `BAAI/bge-reranker-base` Cross-Encoder 精排 |
 | 向量存储 | `backend/app/storage/vector_store.py` | DashScope Embedding 和 Chroma 持久化 |
-| 前端 | `streamlit_demo.py` | 导入、模式切换、来源卡片、数据看板和耗时展示 |
+| Key 与余额 | `backend/app/api/key_validate.py` | 请求级 Key 验证和 DeepSeek 当前余额查询 |
+| 前端 | `streamlit_demo.py` | 顶部多页导航、导入、问答、来源卡片、余额和数据看板 |
 | 回归评测 | `eval_10questions.py` | 双模式逐题请求、规则判定和 Markdown 报告生成 |
 
 ## 回归评测
@@ -135,7 +184,7 @@ uv run python eval_10questions.py
 
 > 出于隐私考虑，个人笔记和本地索引未提交到仓库，因此新克隆项目不能直接复现上述固定分数。请先替换为自己的脱敏测试笔记，并相应修改 `QUESTIONS`。
 
-## 从零运行
+## 完整安装与运行
 
 ### 1. 环境要求
 
@@ -149,8 +198,8 @@ uv run python eval_10questions.py
 ### 2. 克隆并安装依赖
 
 ```powershell
-git clone https://gitee.com/yuyuyuoo55/personal-note-review-assistant.git
-cd personal-note-review-assistant
+git clone https://github.com/yuyuyuoo55/Personal_Notes_Review_Assistant.git
+cd Personal_Notes_Review_Assistant
 uv venv --python 3.12
 uv pip install -r requirements.txt
 ```
@@ -206,12 +255,13 @@ uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 
 
 ### 5. 使用步骤
 
-1. 在侧边栏填写自己的 DeepSeek API Key，点击“验证 Key”；验证通过后控件才会解锁。
-2. 上传一份非空 `.md` 笔记、一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片，或一个包含一份 Markdown 与配套图片的 `.zip`。
+1. 打开顶部导航的“设置”，填写自己的 DeepSeek API Key，点击“保存并验证”；验证通过后会显示当前余额并解锁其他功能。
+2. 进入“知识库”，上传一份非空 `.md` 笔记、一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片，或一个包含一份 Markdown 与配套图片的 `.zip`。
 3. 文档包含本地图片时，建议将图片放入 Markdown 同级的 `images/` 目录，并保持 `![说明](images/文件名.png)` 相对路径后整体压缩为 ZIP。
 4. 点击“导入文件”，等待图片描述、切分与向量化完成。旧文档中的本地绝对路径会在 ZIP 内按唯一文件名尝试匹配。
-4. 选择“快速模式”或“精确查找”，输入问题查看回答与来源。
-5. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会把图片描述与问题一起用于当前 RAG 模式。
+5. 返回“智能问答”，选择“快速模式”或“精确查找”，输入问题查看回答与来源。
+6. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会把图片描述与问题一起用于当前 RAG 模式。
+7. 进入“数据看板”，查看笔记总数、片段分布和资料类型占比。
 
 用户 Key 只保存在当前 Streamlit `session_state`，并通过 `X-DeepSeek-API-Key` 请求头传给后端；不会写入数据库、配置文件或日志。
 
@@ -223,12 +273,7 @@ uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 
 uv run pytest -q
 ```
 
-当前自动化测试包含：
-
-- `GET /api/health` 健康检查；
-- logger 命名行为。
-
-本仓库当前验证结果见实际执行输出。测试覆盖缺 Key、Key 验证、图片参与 RAG、错误降级、本地图片块、独立图片清单恢复、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
+当前版本本机回归结果为 `30 passed`。测试覆盖健康检查、缺 Key、Key 验证、余额查询、图片参与 RAG、错误降级、Markdown 图文 ZIP、笔记删除、本地图片块、独立图片清单恢复、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
 
 多模态回归用例位于 `tests/test_multimodal.py`：验证图片描述会与用户问题拼接并进入 RAG，同时检查本地图片块及来源 metadata。
 
@@ -269,7 +314,7 @@ Personal_Notes_Review_Assistant/
 | `POST` | `/api/key/validate` | 验证请求头中的 DeepSeek Key，不保存 Key |
 | `GET` | `/api/key/balance` | 查询当前 DeepSeek 总余额，不保存 Key |
 
-`/api/notes/import`、`/api/chat` 和 `/api/chat/image` 都要求请求头：
+`/api/notes/import`、`/api/chat`、`/api/chat/image`、`/api/key/validate` 和 `/api/key/balance` 都要求请求头：
 
 ```http
 X-DeepSeek-API-Key: YOUR_API_KEY_HERE
