@@ -202,6 +202,34 @@ async def validate_deepseek_api_key(api_key: str) -> None:
         raise ImageProcessingError("无法连接 DeepSeek，请稍后重试") from error
 
 
+async def get_deepseek_balance(api_key: str) -> dict[str, str | bool]:
+    """Query the current total balance without persisting or logging the BYOK key."""
+    url = f"{DEEPSEEK_API_BASE_URL.rstrip('/')}/user/balance"
+    try:
+        async with httpx.AsyncClient(timeout=VLM_TIMEOUT_SECONDS, trust_env=False) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        if response.status_code in {401, 403}:
+            raise InvalidApiKeyError("API Key 无效，请检查后重试")
+        response.raise_for_status()
+        payload = response.json()
+        balance_infos = payload.get("balance_infos") or []
+        if not isinstance(balance_infos, list) or not balance_infos:
+            raise ValueError("missing balance_infos")
+        balance = next(
+            (item for item in balance_infos if item.get("currency") == "CNY"),
+            balance_infos[0],
+        )
+        return {
+            "is_available": bool(payload.get("is_available")),
+            "currency": str(balance["currency"]),
+            "total_balance": str(balance["total_balance"]),
+        }
+    except InvalidApiKeyError:
+        raise
+    except (httpx.TimeoutException, httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        raise ImageProcessingError("余额查询失败，请稍后重试") from error
+
+
 def _deepseek_payload(question: str, image_url: str, *, stream: bool) -> dict:
     return {
         "model": DEEPSEEK_VISION_MODEL,

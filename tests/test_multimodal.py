@@ -215,6 +215,35 @@ def test_key_validate_endpoint_reports_valid_and_invalid(monkeypatch):
     assert "provider detail" not in response.text
 
 
+def test_balance_endpoint_returns_only_current_total(monkeypatch):
+    async def fake_balance(api_key):
+        assert api_key == TEST_KEY
+        return {"is_available": True, "currency": "CNY", "total_balance": "88.50"}
+
+    monkeypatch.setattr("backend.app.api.key_validate.get_deepseek_balance", fake_balance)
+    response = client.get("/api/key/balance", headers={"X-DeepSeek-API-Key": TEST_KEY})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "is_available": True,
+        "currency": "CNY",
+        "total_balance": "88.50",
+    }
+    assert "topped_up_balance" not in response.text
+    assert "granted_balance" not in response.text
+
+
+def test_balance_endpoint_hides_provider_errors(monkeypatch):
+    async def fail_balance(api_key):
+        raise ImageProcessingError(f"provider failed for {api_key}")
+
+    monkeypatch.setattr("backend.app.api.key_validate.get_deepseek_balance", fail_balance)
+    response = client.get("/api/key/balance", headers={"X-DeepSeek-API-Key": TEST_KEY})
+
+    assert response.json() == {"success": False, "message": "余额查询失败，请稍后重试"}
+    assert TEST_KEY not in response.text
+
+
 def test_invalid_api_key_aborts_markdown_import(monkeypatch, tmp_path):
     """Key 无效时必须中止整篇导入并抛出明确错误，而不是默默跳过图片。"""
     tiny_image = base64.b64encode(b"\x89PNG\r\n\x1a\nmock").decode("ascii")

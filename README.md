@@ -13,6 +13,7 @@
 - **本地数据持久化**：原始 Markdown、导入图片、Chroma 向量索引和 BM25 索引均保存在本机。
 - **流式交互**：FastAPI 通过 SSE 返回检索阶段、来源、回答 token 和耗时。
 - **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
+- **余额查询**：Key 验证通过后，每次进入设置页会自动查询并显示当前 DeepSeek 总余额。
 - **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片也会先转成描述，再参与当前 RAG 模式。
 
 > 当前版本是单机 MVP：支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。章节小测、通用批量导入、笔记更新和多用户能力尚未实现。
@@ -266,6 +267,7 @@ Personal_Notes_Review_Assistant/
 | `POST` | `/api/chat` | SSE 问答；支持 `fast` / `accurate` 模式 |
 | `POST` | `/api/chat/image` | multipart 图片 RAG；字段为 `query`、`image`、`mode` 和 `conversation_id` |
 | `POST` | `/api/key/validate` | 验证请求头中的 DeepSeek Key，不保存 Key |
+| `GET` | `/api/key/balance` | 查询当前 DeepSeek 总余额，不保存 Key |
 
 `/api/notes/import`、`/api/chat` 和 `/api/chat/image` 都要求请求头：
 

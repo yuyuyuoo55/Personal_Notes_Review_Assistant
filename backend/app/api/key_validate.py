@@ -6,6 +6,7 @@ from backend.app.core.auth import require_user_deepseek_api_key
 from backend.app.services.multimodal_service import (
     ImageProcessingError,
     InvalidApiKeyError,
+    get_deepseek_balance,
     validate_deepseek_api_key,
 )
 
@@ -23,3 +24,15 @@ async def validate_key(
         return {"valid": False, "message": "API Key 无效，请检查后重试"}
     except ImageProcessingError:
         return {"valid": False, "message": "无法连接 DeepSeek，请稍后重试"}
+
+
+@router.get("/balance")
+async def get_balance(
+    api_key: str = Depends(require_user_deepseek_api_key),
+) -> dict[str, str | bool]:
+    try:
+        return await get_deepseek_balance(api_key)
+    except InvalidApiKeyError:
+        return {"success": False, "message": "API Key 无效，请重新验证"}
+    except ImageProcessingError:
+        return {"success": False, "message": "余额查询失败，请稍后重试"}

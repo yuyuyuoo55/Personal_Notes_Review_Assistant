@@ -75,8 +75,12 @@ from backend.app.services.multimodal_service import (  # noqa: E402
 # validate_deepseek_api_key 用于"验证 Key"按钮；若云端该版本暂缺此函数，
 # 降级为"验证 Key"按钮不可用，但 app 本体仍能正常启动和展示，不整体崩溃。
 try:
-    from backend.app.services.multimodal_service import validate_deepseek_api_key  # noqa: E402
+    from backend.app.services.multimodal_service import (  # noqa: E402
+        get_deepseek_balance,
+        validate_deepseek_api_key,
+    )
 except ImportError:  # pragma: no cover
+    get_deepseek_balance = None
     validate_deepseek_api_key = None
 from backend.app.services.image_chunk_store import (  # noqa: E402
     load_standalone_image_chunks,
@@ -465,6 +469,7 @@ def clear_api_key() -> None:
     st.session_state.validated_api_key = ""
     if "api_key_input" in st.session_state:
         st.session_state.api_key_input = ""
+    st.session_state.pop("deepseek_balance", None)
 
 
 def render_settings_page() -> None:
@@ -499,11 +504,25 @@ def render_settings_page() -> None:
                         asyncio.run(validate_deepseek_api_key(candidate_key))
                         st.session_state.deepseek_api_key = candidate_key
                         st.session_state.validated_api_key = candidate_key
+                        st.session_state.pop("deepseek_balance", None)
                         st.success("已保存，当前会话内有效")
                     except ImageProcessingError as error:
                         st.session_state.validated_api_key = ""
                         st.error(str(error))
             clear_column.button("清除 Key", use_container_width=True, on_click=clear_api_key)
+            if has_valid_api_key():
+                if get_deepseek_balance is None:
+                    st.error("当前环境缺少余额查询组件，请先部署最新代码后重试。")
+                else:
+                    try:
+                        st.session_state.deepseek_balance = asyncio.run(
+                            get_deepseek_balance(st.session_state.deepseek_api_key)
+                        )
+                    except ImageProcessingError as error:
+                        st.error(str(error))
+                balance = st.session_state.get("deepseek_balance")
+                if balance:
+                    st.metric("当前余额", f"{balance['total_balance']} {balance['currency']}")
         st.markdown(
             "<div class='privacy-note'>🔒 Key 仅保存在当前浏览器会话中，不会写入数据库或日志。刷新或关闭会话后可能清空。</div>",
             unsafe_allow_html=True,

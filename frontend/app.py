@@ -281,6 +281,7 @@ def clear_api_key() -> None:
     st.session_state.validated_api_key = ""
     if "api_key_input" in st.session_state:
         st.session_state.api_key_input = ""
+    st.session_state.pop("deepseek_balance", None)
 
 
 def render_settings_page() -> None:
@@ -319,6 +320,7 @@ def render_settings_page() -> None:
                         if result.get("valid"):
                             st.session_state.deepseek_api_key = candidate_key
                             st.session_state.validated_api_key = candidate_key
+                            st.session_state.pop("deepseek_balance", None)
                         else:
                             st.session_state.validated_api_key = ""
                             st.error(result.get("message", "API Key 验证失败"))
@@ -328,6 +330,23 @@ def render_settings_page() -> None:
             clear_column.button("清除 Key", use_container_width=True, on_click=clear_api_key)
             if has_valid_api_key():
                 st.success("已保存，当前会话内有效")
+                try:
+                    response = httpx.get(
+                        f"{API_BASE_URL}/api/key/balance",
+                        headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    if result.get("success") is False:
+                        st.error(result.get("message", "余额查询失败，请稍后重试"))
+                    else:
+                        st.session_state.deepseek_balance = result
+                except (httpx.HTTPError, ValueError):
+                    st.error("余额查询失败，请稍后重试")
+                balance = st.session_state.get("deepseek_balance")
+                if balance:
+                    st.metric("当前余额", f"{balance['total_balance']} {balance['currency']}")
         st.markdown(
             "<div class='privacy-note'>🔒 Key 仅保存在当前浏览器会话中，不会写入数据库或日志。刷新或关闭会话后可能清空。</div>",
             unsafe_allow_html=True,
