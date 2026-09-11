@@ -7,10 +7,13 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![在线体验](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)
 [![Tests](https://img.shields.io/badge/tests-30%20passed-4f7a63)](#测试与验证)
 [![License](https://img.shields.io/badge/license-MIT-d0a64a)](LICENSE)
 
 上传 Markdown、图文 ZIP 或单张图片，用自然语言复习自己的资料。回答会附带来源文件、章节和原文片段；检索不到可靠依据时明确拒答。
+
+🚀 **在线体验：** [打开 Streamlit Demo](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)（首次打开可能需要等待应用唤醒；请在“设置”中填写自己的 DeepSeek API Key，勿分享或提交密钥。）
 
 [核心能力](#项目亮点) · [快速开始](#快速开始) · [技术架构](#技术架构) · [回归评测](#回归评测) · [API](#api) · [已知边界](#已知边界)
 
