@@ -168,7 +168,6 @@ class FastAgentEvent:
     sources: list[SourceChunk] = field(default_factory=list)
     """
     default_factory=list 表示：
-    default_factory=list 表示：
     每创建一个 FastAgentEvent
     → 都新建自己的空列表
     这和 Java 中每个对象各自：
