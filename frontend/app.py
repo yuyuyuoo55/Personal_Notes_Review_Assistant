@@ -260,9 +260,11 @@ def delete_note_request(note_id: str | None = None) -> None:
     get_notes.clear()
 
 
-def render_sources(sources: list[dict]) -> None:
+def render_sources(sources: list[dict], *, image_query: bool = False) -> None:
     """展示后端 SSE meta 事件返回的来源片段。"""
     if not sources:
+        if image_query:
+            st.caption("笔记中无相关记录")
         return
 
     with st.expander("参考笔记", expanded=False):
@@ -703,7 +705,10 @@ with chat_column:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if message["role"] == "assistant":
-                    render_sources(message.get("sources", []))
+                    render_sources(
+                        message.get("sources", []),
+                        image_query=bool(message.get("image_query", False)),
+                    )
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
 
@@ -821,13 +826,14 @@ with chat_column:
                         reranker_progress.empty()
 
                     answer_placeholder.markdown(answer)
-                    render_sources(sources)
+                    render_sources(sources, image_query=bool(uploaded_chat_image))
                     st.caption(f"本次回答耗时：{elapsed_ms / 1000:.2f} 秒")
                     st.session_state.messages.append(
                         {
                             "role": "assistant",
                             "content": answer,
                             "sources": sources,
+                            "image_query": bool(uploaded_chat_image),
                             "elapsed_ms": elapsed_ms,
                         }
                     )

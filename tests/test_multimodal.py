@@ -12,6 +12,7 @@ from backend.app.main import app
 from backend.app.api import notes as notes_api
 from backend.app.services import markdown_image_service
 from backend.app.services import multimodal_service
+from backend.app.services import rag_service
 from backend.app.services.image_chunk_store import (
     load_standalone_image_chunks,
     save_image_chunks,
@@ -20,6 +21,7 @@ from backend.app.services.multimodal_service import ImageProcessingError, Invali
 from backend.app.services.multimodal_service import _raise_for_vision_response
 from backend.app.services.multimodal_service import _maybe_compress_image
 from backend.app.services.rag_service import create_chat_model
+from backend.app.services.chat_service import generate_responses_based_on_the_data
 
 
 client = TestClient(app)
@@ -41,7 +43,7 @@ def test_chat_and_import_require_user_api_key():
     assert import_response.status_code == 401
 
 
-def test_image_question_description_participates_in_rag(monkeypatch, caplog):
+def test_image_question_description_only_assists_retrieval(monkeypatch, caplog):
     async def fake_describe(image_url, api_key):
         assert image_url.startswith("data:image/png;base64,")
         assert api_key == TEST_KEY
@@ -52,8 +54,8 @@ def test_image_question_description_participates_in_rag(monkeypatch, caplog):
         fake_describe,
     )
     def fake_prepare(**kwargs):
-        assert "会议时间为周五下午三点" in kwargs["original_query"]
-        assert "这张图片讲了什么" in kwargs["original_query"]
+        assert kwargs["original_query"] == "这张图片讲了什么"
+        assert kwargs["retrieval_hint"] == "图片内容：会议时间为周五下午三点"
         return SimpleNamespace(
             rewritten_query=kwargs["original_query"],
             sources=[],
@@ -71,6 +73,158 @@ def test_image_question_description_participates_in_rag(monkeypatch, caplog):
     assert "命中笔记内容" in response.text
     assert "event: done" in response.text
     assert TEST_KEY not in caplog.text
+
+
+def test_image_retrieval_refuses_when_notes_are_not_relevant(monkeypatch):
+    captured_queries = []
+    note = Document(page_content="完全无关的 Docker 笔记", metadata={"source": "docker.md"})
+
+    class FakeChatModel:
+        def stream(self, prompt):
+            raise AssertionError("无可靠笔记时不应调用回答模型")
+
+    monkeypatch.setattr(rag_service, "load_all_chunks", lambda: (note,))
+    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: FakeChatModel())
+    monkeypatch.setattr(
+        rag_service,
+        "query_rewrite",
+        lambda query, model: captured_queries.append(query) or query,
+    )
+    monkeypatch.setattr(
+        rag_service,
+        "vector_retriever",
+        lambda **kwargs: [(note, rag_service.MAX_VECTOR_DISTANCE + 0.5)],
+    )
+    monkeypatch.setattr(rag_service, "bm25_retriever", lambda **kwargs: [(note, 0.0)])
+
+    preparation = rag_service.prepare_rag_answer(
+        original_query="图片里的会议时间是什么？",
+        mode="fast",
+        conversation_id="image-test",
+        api_key=TEST_KEY,
+        retrieval_hint="图片内容：会议时间为周五下午三点",
+    )
+    answer = "".join(event.content for event in preparation.answer_stream)
+
+    assert preparation.sources == []
+    assert "没有在当前笔记库中找到足够可靠的资料" in answer
+    assert "无法基于笔记回答" in answer
+    assert "会议时间为周五下午三点" in captured_queries[0]
+    assert "图片里的会议时间是什么？" in captured_queries[0]
+
+
+def test_plain_fast_question_keeps_original_agent_path(monkeypatch):
+    fake_model = object()
+
+    def fake_agent_stream(**kwargs):
+        assert kwargs["query"] == "什么是 RRF？"
+        yield SimpleNamespace(event="token", content="原有快速回答", sources=[])
+
+    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: fake_model)
+    monkeypatch.setattr(rag_service, "stream_fast_agent_answer", fake_agent_stream)
+    monkeypatch.setattr(
+        rag_service,
+        "load_all_chunks",
+        lambda: (_ for _ in ()).throw(AssertionError("纯文本快速模式不应进入精确检索")),
+    )
+
+    preparation = rag_service.prepare_rag_answer(
+        original_query="什么是 RRF？",
+        mode="fast",
+        conversation_id="text-test",
+        api_key=TEST_KEY,
+    )
+    answer = "".join(event.content for event in preparation.answer_stream)
+
+    assert preparation.rewritten_query == "什么是 RRF？"
+    assert answer == "原有快速回答"
+
+
+def test_plain_accurate_prompt_does_not_include_image_only_rules():
+    captured_prompts = []
+
+    class FakeChatModel:
+        def stream(self, prompt):
+            captured_prompts.append(prompt)
+            yield SimpleNamespace(content="纯文本回答")
+
+    answer = "".join(generate_responses_based_on_the_data(
+        query="什么是 Redis？",
+        chat_model=FakeChatModel(),
+        reranked_results=[{"content": "Redis 笔记", "metadata": {}}],
+    ))
+
+    assert answer == "纯文本回答"
+    assert "【笔记资料】" not in captured_prompts[0]
+    assert "【本次上传的图片】" not in captured_prompts[0]
+    assert "必须区分资料来源" not in captured_prompts[0]
+
+
+def test_image_description_assists_retrieval_but_is_not_answer_material(monkeypatch):
+    captured_prompts = []
+    captured_queries = []
+    note = Document(
+        page_content="会议安排需要提前十分钟签到",
+        metadata={"source": "会议笔记.md", "chunk_id": "meeting-1"},
+    )
+    reranked = [
+        {
+            "id": "meeting-1",
+            "content": note.page_content,
+            "metadata": note.metadata,
+        }
+    ]
+
+    class FakeChatModel:
+        def stream(self, prompt):
+            captured_prompts.append(prompt)
+            yield SimpleNamespace(content="根据笔记回答")
+
+    monkeypatch.setattr(rag_service, "load_all_chunks", lambda: (note,))
+    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: FakeChatModel())
+    monkeypatch.setattr(
+        rag_service,
+        "query_rewrite",
+        lambda query, model: captured_queries.append(query) or query,
+    )
+    monkeypatch.setattr(rag_service, "vector_retriever", lambda **kwargs: [(note, 0.2)])
+    monkeypatch.setattr(rag_service, "bm25_retriever", lambda **kwargs: [(note, 1.0)])
+    monkeypatch.setattr(rag_service, "rrf_fusion", lambda result_lists: reranked)
+    monkeypatch.setattr(rag_service, "get_reranker_model", lambda: None)
+    monkeypatch.setattr(
+        rag_service,
+        "cross_encoder_reranker_index",
+        lambda **kwargs: reranked,
+    )
+
+    preparation = rag_service.prepare_rag_answer(
+        original_query="会议需要注意什么？",
+        mode="accurate",
+        api_key=TEST_KEY,
+        retrieval_hint="图片内容：会议时间为周五下午三点",
+    )
+    answer = "".join(event.content for event in preparation.answer_stream)
+
+    assert answer == "根据笔记回答"
+    assert [source.file_name for source in preparation.sources] == ["会议笔记.md"]
+    assert "会议时间为周五下午三点" in captured_queries[0]
+    assert "会议时间为周五下午三点" not in captured_prompts[0]
+    assert "会议安排需要提前十分钟签到" in captured_prompts[0]
+
+
+def test_blurry_image_without_notes_is_not_used_as_answer_material(monkeypatch):
+    monkeypatch.setattr(rag_service, "load_all_chunks", lambda: ())
+
+    preparation = rag_service.prepare_rag_answer(
+        original_query="图片里写了什么？",
+        mode="fast",
+        api_key=TEST_KEY,
+        retrieval_hint="图片内容：图片模糊，文字无法识别",
+    )
+    answer = "".join(event.content for event in preparation.answer_stream)
+
+    assert "没有在当前笔记库中找到足够可靠的资料" in answer
+    assert "无法基于笔记回答" in answer
 
 
 def test_invalid_image_type_degrades_to_chinese_message():

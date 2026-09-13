@@ -67,6 +67,7 @@ from backend.app.services.markdown_image_service import enrich_markdown_images  
 from backend.app.services.markdown_bundle_service import read_markdown_bundle  # noqa: E402
 from backend.app.services.multimodal_service import (  # noqa: E402
     ImageProcessingError,
+    _maybe_compress_image,
     build_image_chunk,
     describe_image_url,
     image_data_url,
@@ -1011,6 +1012,8 @@ with chat_column:
                                 if img and str(img) not in shown_imgs:
                                     st.image(img)
                                 st.divider()
+                    elif message.get("image_query", False):
+                        st.caption("笔记中无相关记录")
                     if "elapsed_ms" in message:
                         st.caption(f"本次回答耗时：{message['elapsed_ms'] / 1000:.2f} 秒")
 
@@ -1083,16 +1086,19 @@ with chat_column:
                             )
                             image_bytes = uploaded_chat_image.getvalue()
                             mime = validate_image(image_bytes, uploaded_chat_image.type)
+                            compressed_image = _maybe_compress_image(image_bytes, mime)
                             description = asyncio.run(describe_image_url(
-                                image_data_url(image_bytes, mime),
+                                image_data_url(compressed_image, mime),
                                 st.session_state.deepseek_api_key,
                             ))
-                            rag_query = f"图片内容：{description}\n\n用户问题：{question}"
+                            # 与 /api/chat/image 保持一致：图片描述只辅助检索，
+                            # 最终回答仍只使用检索到的笔记资料。
                             preparation = prepare_rag_answer(
-                                original_query=rag_query,
+                                original_query=question,
                                 mode=st.session_state.retrieval_mode,
                                 conversation_id=st.session_state.conversation_id,
                                 api_key=st.session_state.deepseek_api_key,
+                                retrieval_hint=f"图片内容：{description}",
                             )
                         else:
                             preparation = prepare_rag_answer(
@@ -1125,8 +1131,9 @@ with chat_column:
                 except ImageProcessingError as error:
                     answer = str(error)
                     answer_placeholder.warning(answer)
-                except Exception:
-                    preparing_reranker = False
+                except Exception as error:
+                    # 只记录异常类型，避免把用户 Key、请求内容或供应商响应写入日志。
+                    print(f"[chat-error] {type(error).__name__}", file=sys.stderr)
                     detail = (
                         "精排模型准备失败，请检查网络后重试。"
                         if preparing_reranker
@@ -1150,6 +1157,8 @@ with chat_column:
                             if getattr(source, "image_path", None):
                                 st.image(source.image_path)
                             st.divider()
+                elif uploaded_chat_image:
+                    st.caption("笔记中无相关记录")
                 if answer and not answer.startswith("本次问答"):
                     st.caption(f"本次回答耗时：{elapsed_ms / 1000:.2f} 秒")
                 # 无论是否带图，回答都应存入历史消息，否则 rerun 后纯文字回答会丢失。
@@ -1158,6 +1167,7 @@ with chat_column:
                         "role": "assistant",
                         "content": answer,
                         "sources": sources,
+                        "image_query": bool(uploaded_chat_image),
                         "elapsed_ms": elapsed_ms,
                     }
                 )

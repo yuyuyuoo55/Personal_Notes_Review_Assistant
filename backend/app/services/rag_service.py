@@ -184,6 +184,7 @@ def prepare_rag_answer(
     mode: str = "fast",
     conversation_id: str = "",
     api_key: str = "",
+    retrieval_hint: str | None = None,
 ) -> RagPreparation:
     """按模式准备流式 RAG 回答；快速模式由 Agent 自主决定是否检索。"""
     global _bm25_rebuild_required
@@ -191,8 +192,9 @@ def prepare_rag_answer(
     if mode not in {"fast", "accurate"}:
         raise ValueError("不支持的检索模式")
 
-    # 0. 快速模式：create_agent 负责“直接答 / 调工具 / 根据工具结果再答”。
-    if mode == "fast":
+    # 0. 纯文本快速模式保持原样：create_agent 负责“直接答 / 调工具 / 根据工具结果再答”。
+    # 图片辅助检索时走下方固定 RAG，确保最终回答只使用检索到的笔记。
+    if mode == "fast" and retrieval_hint is None:
         chat_model = create_chat_model(api_key)
         return RagPreparation(
             rewritten_query=original_query,
@@ -208,14 +210,17 @@ def prepare_rag_answer(
             ),
         )
 
-    # 1. 精确查找：固定执行完整 Step RAG，不使用会话记忆。
+    # 1. 精确查找，以及图片辅助检索：固定执行完整 Step RAG。
     all_chunks = list(load_all_chunks())
     if not all_chunks:
         return no_material_preparation(original_query, mode)
 
-    # 2. 查询改写只执行一次，随后两路检索共用改写后的问题。
+    # 2. 回答仍使用纯用户问题；图片描述只在检索查询中使用。
     chat_model = create_chat_model(api_key)
-    rewritten_query = query_rewrite(original_query, chat_model)
+    retrieval_query = original_query
+    if retrieval_hint:
+        retrieval_query = f"{retrieval_hint}\n\n用户问题：{original_query}"
+    rewritten_query = query_rewrite(retrieval_query, chat_model)
 
     # 3. 双路召回。
     vector_results = vector_retriever(

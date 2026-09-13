@@ -34,6 +34,7 @@ RAG 三层评估脚本（检索层 + 生成层 + 应用层）
 
 import getpass
 import json
+import os
 import uuid
 import urllib.request
 from datetime import datetime
@@ -207,8 +208,51 @@ def faithfulness_score(answer, source_texts, api_key):
         return None, f"judge错误:{e}"
 
 
+def sanitize_api_key(value):
+    """清理终端粘贴时可能混入的不可见控制字符。"""
+    return "".join(char for char in value.strip() if 32 < ord(char) < 127)
+
+
+def hidden_api_key_input(prompt):
+    """隐藏读取 Key；Windows 下支持 Ctrl+V 粘贴且不回显。"""
+    if os.name != "nt":
+        return getpass.getpass(prompt)
+
+    import msvcrt
+    import tkinter
+
+    print(prompt, end="", flush=True)
+    chars = []
+    while True:
+        char = msvcrt.getwch()
+        if char in ("\r", "\n"):
+            print()
+            return "".join(chars)
+        if char == "\x03":
+            raise KeyboardInterrupt
+        if char == "\b":
+            if chars:
+                chars.pop()
+            continue
+        if char == "\x16":
+            root = tkinter.Tk()
+            root.withdraw()
+            try:
+                chars.extend(root.clipboard_get())
+            finally:
+                root.destroy()
+            continue
+        if char in ("\x00", "\xe0"):
+            msvcrt.getwch()
+            continue
+        chars.append(char)
+
+
 def main():
-    api_key = getpass.getpass("请输入您的 DeepSeek API Key（不显示）：").strip()
+    raw_api_key = hidden_api_key_input("请输入您的 DeepSeek API Key（不显示）：")
+    api_key = sanitize_api_key(raw_api_key)
+    if api_key != raw_api_key.strip():
+        print("检测到 Key 中包含不可见字符，已自动清理。")
     if not api_key:
         print("请先输入API Key")
         return

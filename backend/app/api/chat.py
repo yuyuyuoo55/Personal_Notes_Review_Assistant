@@ -11,6 +11,7 @@ from backend.app.schemas.chat import ChatRequest
 from backend.app.core.auth import require_user_deepseek_api_key
 from backend.app.services.multimodal_service import (
     ImageProcessingError,
+    _maybe_compress_image,
     describe_image_url,
     image_data_url,
     validate_image,
@@ -141,19 +142,24 @@ async def chat_with_image(
     image: UploadFile = File(...),
     api_key: str = Depends(require_user_deepseek_api_key),
 ) -> StreamingResponse:
-    """Describe the uploaded image, then use description plus question for RAG."""
+    """用上传图片的描述辅助检索，最终回答仍只依据个人笔记。"""
     image_bytes = await image.read()
     content_type = image.content_type or "application/octet-stream"
 
     try:
         mime = validate_image(image_bytes, content_type)
-        description = await describe_image_url(image_data_url(image_bytes, mime), api_key)
-        rag_query = f"图片内容：{description}\n\n用户问题：{query}"
+        compressed_image = _maybe_compress_image(image_bytes, mime)
+        description = await describe_image_url(
+            image_data_url(compressed_image, mime),
+            api_key,
+        )
+        # 与 streamlit_demo.py 保持一致：图片描述只辅助检索，不进入最终回答资料。
         preparation = prepare_rag_answer(
-            original_query=rag_query,
+            original_query=query,
             mode=mode,
             conversation_id=conversation_id,
             api_key=api_key,
+            retrieval_hint=f"图片内容：{description}",
         )
         preparation_error = None
     except ImageProcessingError as error:
@@ -166,10 +172,9 @@ async def chat_with_image(
             yield sse_event("meta", {"rewritten_query": query, "mode": mode, "sources": []})
             yield sse_event("token", {"content": preparation_error})
         else:
-            meta_sent = False
-            if mode == "accurate":
-                yield sse_event("meta", {"rewritten_query": preparation.rewritten_query, "mode": mode, "sources": [source.model_dump() for source in preparation.sources]})
-                meta_sent = True
+            # 图片请求的检索在生成前已完成，两种模式都可以立即返回可靠来源。
+            yield sse_event("meta", {"rewritten_query": preparation.rewritten_query, "mode": mode, "sources": [source.model_dump() for source in preparation.sources]})
+            meta_sent = True
             for item in preparation.answer_stream:
                 if item.event == "sources":
                     yield sse_event("meta", {"rewritten_query": preparation.rewritten_query, "mode": mode, "sources": [source.model_dump() for source in item.sources or []]})

@@ -47,3 +47,7 @@ task_plan.md
 /UI优化任务.md
 /UI重构提示词.md
 /从零开发流程.md
+
+# 课设交付物与评测输出（本地保留，不进仓库）
+/outputs/
+/eval_rag_result_*.md
