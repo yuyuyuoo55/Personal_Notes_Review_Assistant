@@ -113,31 +113,50 @@ def test_image_retrieval_refuses_when_notes_are_not_relevant(monkeypatch):
     assert "图片里的会议时间是什么？" in captured_queries[0]
 
 
-def test_plain_fast_question_keeps_original_agent_path(monkeypatch):
-    fake_model = object()
+def test_legacy_modes_share_the_unified_retrieval_path(monkeypatch):
+    note = Document(page_content="RRF 按排名融合检索结果", metadata={"source": "rag.md"})
+    seen_queries = []
 
-    def fake_agent_stream(**kwargs):
-        assert kwargs["query"] == "什么是 RRF？"
-        yield SimpleNamespace(event="token", content="原有快速回答", sources=[])
+    class FakeChatModel:
+        pass
 
-    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: fake_model)
-    monkeypatch.setattr(rag_service, "stream_fast_agent_answer", fake_agent_stream)
+    monkeypatch.setattr(rag_service, "load_all_chunks", lambda: (note,))
+    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: FakeChatModel())
+    monkeypatch.setattr(rag_service, "query_rewrite", lambda query, model: query)
     monkeypatch.setattr(
         rag_service,
-        "load_all_chunks",
-        lambda: (_ for _ in ()).throw(AssertionError("纯文本快速模式不应进入精确检索")),
+        "vector_retriever",
+        lambda **kwargs: seen_queries.append(kwargs["query"]) or [(note, 0.2)],
+    )
+    monkeypatch.setattr(rag_service, "bm25_retriever", lambda **kwargs: [(note, 1.0)])
+    monkeypatch.setattr(
+        rag_service,
+        "rrf_fusion",
+        lambda result_lists: [{"id": "rag-1", "content": note.page_content, "metadata": note.metadata}],
+    )
+    monkeypatch.setattr(
+        rag_service,
+        "cross_encoder_reranker_index",
+        lambda **kwargs: kwargs["rrf_results"],
+    )
+    monkeypatch.setattr(
+        rag_service,
+        "generate_responses_based_on_the_data",
+        lambda **kwargs: iter(["统一检索回答"]),
     )
 
-    preparation = rag_service.prepare_rag_answer(
-        original_query="什么是 RRF？",
-        mode="fast",
-        conversation_id="text-test",
-        api_key=TEST_KEY,
-    )
-    answer = "".join(event.content for event in preparation.answer_stream)
+    for legacy_mode in ("fast", "accurate"):
+        preparation = rag_service.prepare_rag_answer(
+            original_query="什么是 RRF？",
+            mode=legacy_mode,
+            conversation_id="text-test",
+            api_key=TEST_KEY,
+        )
+        answer = "".join(event.content for event in preparation.answer_stream)
+        assert preparation.mode == "unified"
+        assert answer == "统一检索回答"
 
-    assert preparation.rewritten_query == "什么是 RRF？"
-    assert answer == "原有快速回答"
+    assert seen_queries == ["什么是 RRF？", "什么是 RRF？"]
 
 
 def test_plain_accurate_prompt_does_not_include_image_only_rules():

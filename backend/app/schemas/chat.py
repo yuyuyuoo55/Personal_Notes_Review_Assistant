@@ -11,12 +11,12 @@ class ChatRequest(BaseModel):
         max_length=500,
         description="用户输入的原始问题",
     )
-    mode: Literal["fast", "accurate"] = Field(
-        default="fast",
-        description="检索模式：fast 只走向量检索；accurate 走完整混合检索链路。",
+    mode: Literal["unified", "fast", "accurate"] = Field(
+        default="unified",
+        description="统一检索模式；fast/accurate 仅用于兼容旧客户端，处理链路相同。",
     )
     conversation_id: str = Field(
         min_length=1,
         max_length=64,
-        description="浏览器会话标识，仅快速模式用于读取和更新内存记忆。",
+        description="浏览器会话标识，当前版本仅为兼容旧客户端保留。",
     )

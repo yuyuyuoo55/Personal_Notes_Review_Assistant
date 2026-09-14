@@ -1,4 +1,4 @@
-"""RAG 业务编排：快速 Agentic RAG 与精确 Step RAG。"""
+"""RAG 业务编排：所有问题统一执行可追溯的混合检索链路。"""
 
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -11,7 +11,6 @@ from langchain_core.documents import Document
 
 from backend.app.core.config import DEEPSEEK_TEXT_MODEL, UPLOAD_DIRECTORY
 from backend.app.schemas.note import SourceChunk
-from backend.app.services.agent_service import FastAgentEvent, stream_fast_agent_answer
 from backend.app.services.bm25_retriever import bm25_retriever, _HAS_PKUSEG
 from backend.app.services.chat_service import generate_responses_based_on_the_data
 from backend.app.services.note_loader import load_notes
@@ -43,12 +42,13 @@ class RagPreparation:
     answer_stream: Generator[RagStreamEvent, None, None]
 
 
-# 新导入笔记后设为 True；下一次精确查找才重建 BM25。
+# 新导入笔记后设为 True；下一次检索时重建 BM25。
 _bm25_rebuild_required = True
 
-# 精确查找仍保留该阈值：向量很远且 BM25 未命中时，不进入后续精排。
+# 向量很远且 BM25 未命中时，不进入后续精排。
 MAX_VECTOR_DISTANCE = 1.10
 RERANKER_MODEL_NAME = "BAAI/bge-reranker-base"
+UNIFIED_MODE = "unified"
 
 
 def text_stream(text: str) -> Generator[RagStreamEvent, None, None]:
@@ -57,28 +57,16 @@ def text_stream(text: str) -> Generator[RagStreamEvent, None, None]:
 
 
 def wrap_text_stream(stream: Generator[str, None, None]) -> Generator[RagStreamEvent, None, None]:
-    """将精确查找现有的 str 流转换为统一 RAG 事件。"""
+    """将回答生成器的 str 流转换为统一 RAG 事件。"""
     for content in stream:
         yield RagStreamEvent(event="token", content=content)
 
 
-def wrap_fast_agent_stream(
-    stream: Generator[FastAgentEvent, None, None],
-) -> Generator[RagStreamEvent, None, None]:
-    """将快速 Agent 的事件转换为 RAG 层统一事件。"""
-    for item in stream:
-        yield RagStreamEvent(
-            event=item.event,
-            content=item.content,
-            sources=item.sources,
-        )
-
-
-def no_material_preparation(original_query: str, mode: str) -> RagPreparation:
+def no_material_preparation(original_query: str) -> RagPreparation:
     """资料为空或不相关时，返回用户可理解的拒答，不抛内部异常。"""
     return RagPreparation(
         rewritten_query=original_query,
-        mode=mode,
+        mode=UNIFIED_MODE,
         sources=[],
         answer_stream=text_stream(
             "我没有在当前笔记库中找到足够可靠的资料，无法基于笔记回答这个问题。"
@@ -136,7 +124,7 @@ def is_reranker_cached() -> bool:
 
 @lru_cache
 def load_all_chunks() -> tuple[Document, ...]:
-    """读取所有 Markdown 与独立图片清单，重建精确检索语料。"""
+    """读取所有 Markdown 与独立图片清单，重建统一检索语料。"""
     if not UPLOAD_DIRECTORY.exists():
         return ()
 
@@ -157,7 +145,7 @@ def invalidate_rag_cache() -> None:
 
 
 def build_source_chunks(reranked_results: list[dict]) -> list[SourceChunk]:
-    """将精确查找最终候选转成前端展示的来源 DTO。"""
+    """将统一检索的最终候选转成前端展示的来源 DTO。"""
     sources: list[SourceChunk] = []
     for result in reranked_results:
         metadata = result.get("metadata", {})
@@ -181,39 +169,24 @@ def build_source_chunks(reranked_results: list[dict]) -> list[SourceChunk]:
 
 def prepare_rag_answer(
     original_query: str,
-    mode: str = "fast",
+    mode: str = UNIFIED_MODE,
     conversation_id: str = "",
     api_key: str = "",
     retrieval_hint: str | None = None,
 ) -> RagPreparation:
-    """按模式准备流式 RAG 回答；快速模式由 Agent 自主决定是否检索。"""
+    """准备统一混合检索回答；fast/accurate 仅作为旧客户端兼容值。"""
     global _bm25_rebuild_required
 
-    if mode not in {"fast", "accurate"}:
+    if mode not in {"fast", "accurate", UNIFIED_MODE}:
         raise ValueError("不支持的检索模式")
 
-    # 0. 纯文本快速模式保持原样：create_agent 负责“直接答 / 调工具 / 根据工具结果再答”。
-    # 图片辅助检索时走下方固定 RAG，确保最终回答只使用检索到的笔记。
-    if mode == "fast" and retrieval_hint is None:
-        chat_model = create_chat_model(api_key)
-        return RagPreparation(
-            rewritten_query=original_query,
-            mode=mode,
-            sources=[],
-            answer_stream=wrap_fast_agent_stream(
-                stream_fast_agent_answer(
-                    query=original_query,
-                    conversation_id=conversation_id,
-                    chat_model=chat_model,
-                    api_key=api_key,
-                )
-            ),
-        )
+    # conversation_id 暂时保留在函数签名中，避免旧客户端调用失败。
+    del conversation_id
 
-    # 1. 精确查找，以及图片辅助检索：固定执行完整 Step RAG。
+    # 1. 所有问题固定执行完整混合检索，用户无需选择模式。
     all_chunks = list(load_all_chunks())
     if not all_chunks:
-        return no_material_preparation(original_query, mode)
+        return no_material_preparation(original_query)
 
     # 2. 回答仍使用纯用户问题；图片描述只在检索查询中使用。
     chat_model = create_chat_model(api_key)
@@ -243,7 +216,7 @@ def prepare_rag_answer(
         best_vector_distance is not None and best_vector_distance <= MAX_VECTOR_DISTANCE
     ) or has_keyword_hit
     if not has_relevant_material:
-        return no_material_preparation(original_query, mode)
+        return no_material_preparation(original_query)
 
     # 5. RRF 按排名融合两路结果，随后 Cross-Encoder 精排 Top-3。
     rrf_results = rrf_fusion([vector_results, bm25_results])
@@ -257,7 +230,7 @@ def prepare_rag_answer(
     # 6. 只将最终片段交给生成模块，不回到 Agent。
     return RagPreparation(
         rewritten_query=rewritten_query,
-        mode=mode,
+        mode=UNIFIED_MODE,
         sources=build_source_chunks(reranked_results),
         answer_stream=wrap_text_stream(
             generate_responses_based_on_the_data(

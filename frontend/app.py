@@ -102,20 +102,6 @@ st.markdown(
         background: #426b55;
         border-color: #426b55;
     }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"] {
-        background: #4f8066; color: #ffffff; border: 1px solid #4f8066;
-        box-shadow: 0 3px 10px rgba(49, 93, 69, .16);
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"]:hover {
-        background: #426f58; color: #ffffff; border-color: #426f58;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
-        background: #f7f6f2; color: #4f5965; border: 1px solid #d7d4cf;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"]:hover {
-        background: #eeece7; color: #315d45; border-color: #b8c9bc;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button { min-height: 2.45rem; }
     .st-key-chat_image_popover [data-testid="stPopover"] > button {
         min-height: 2.9rem; background: #fffdf9; color: #315d45;
         border: 1px solid #b8c9bc; border-radius: 14px;
@@ -631,51 +617,11 @@ with chat_column:
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "retrieval_mode" not in st.session_state:
-        st.session_state.retrieval_mode = "fast"
     if "conversation_id" not in st.session_state:
-        # 仅作为本次浏览器会话的内存键；刷新并新建会话或重启后端都会清空记忆。
         st.session_state.conversation_id = uuid4().hex
 
-    # 模式选择位于问答区顶部；每次提问都把当前模式一起发送给 FastAPI。
-    fast_column, accurate_column = st.columns(2, gap="small")
-    with fast_column:
-        if st.button(
-            "快速模式",
-            key="mode_fast",
-            type="primary" if st.session_state.retrieval_mode == "fast" else "secondary",
-            use_container_width=True,
-        ):
-            if st.session_state.retrieval_mode != "fast":
-                # 不拆分聊天记录；仅在真正切换时插入一条模式分隔线。
-                if st.session_state.messages:
-                    st.session_state.messages.append(
-                        {"role": "mode", "content": "已切换到：快速模式（Agentic RAG）"}
-                    )
-                st.session_state.retrieval_mode = "fast"
-            st.rerun()
-    with accurate_column:
-        if st.button(
-            "精确查找",
-            key="mode_accurate",
-            type="primary" if st.session_state.retrieval_mode == "accurate" else "secondary",
-            use_container_width=True,
-        ):
-            if st.session_state.retrieval_mode != "accurate":
-                # 精确查找与快速模式共用历史，但历史中会保留清晰的模式边界。
-                if st.session_state.messages:
-                    st.session_state.messages.append(
-                        {"role": "mode", "content": "已切换到：精确查找（Step RAG）"}
-                    )
-                st.session_state.retrieval_mode = "accurate"
-            st.rerun()
-
-    mode_descriptions = {
-        "fast": "当前链路：Agent 判断 →（直接回答 / 向量检索 Top-3）→ 基于片段回答",
-        "accurate": "当前链路：原问题 → 查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 回答",
-    }
     st.markdown(
-        f"<div class='mode-flow'>{mode_descriptions[st.session_state.retrieval_mode]}</div>",
+        "<div class='mode-flow'>统一检索：查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 基于笔记回答</div>",
         unsafe_allow_html=True,
     )
 
@@ -695,13 +641,6 @@ with chat_column:
             )
 
         for message in st.session_state.messages:
-            if message["role"] == "mode":
-                st.markdown(
-                    f"<div class='mode-history-divider'><span>{message['content']}</span></div>",
-                    unsafe_allow_html=True,
-                )
-                continue
-
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if message["role"] == "assistant":
@@ -759,7 +698,6 @@ with chat_column:
                             request_kwargs = {
                                 "data": {
                                     "query": question,
-                                    "mode": st.session_state.retrieval_mode,
                                     "conversation_id": st.session_state.conversation_id,
                                 },
                                 "files": {
@@ -779,7 +717,6 @@ with chat_column:
                             request_kwargs = {
                                 "json": {
                                     "query": question,
-                                    "mode": st.session_state.retrieval_mode,
                                     "conversation_id": st.session_state.conversation_id,
                                 }
                             }
@@ -845,12 +782,8 @@ with chat_column:
                     answer_placeholder.warning("本次问答暂时无法完成，请稍后重试。")
 
 with focus_column:
-    mode_now = "快速模式（Agentic RAG）" if st.session_state.get("retrieval_mode", "fast") == "fast" else "精确查找（Step RAG）"
-    mode_summary = (
-        "Agent 自主判断是否检索；需要资料时调用向量检索，适合日常复习。"
-        if st.session_state.get("retrieval_mode", "fast") == "fast"
-        else "执行查询改写、双路召回、RRF 与精排，适合准确查找。"
-    )
+    mode_now = "统一混合检索"
+    mode_summary = "系统自动执行查询改写、双路召回、RRF 与精排，用户只需专注提问。"
     st.markdown(
         f"<div class='focus-card'><strong>本次复习 · {mode_now}</strong><span>{mode_summary}</span></div>",
         unsafe_allow_html=True,

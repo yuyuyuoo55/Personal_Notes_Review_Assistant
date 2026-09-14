@@ -260,10 +260,7 @@ def main():
     print("请确认后端已启动。开始三层评测……\n")
 
     rows = []
-    stats = {"fast": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": [],
-                      "by_diff": {"easy": [0, 0], "medium": [0, 0], "hard": [0, 0]},
-                      "by_diff_hit": {"easy": 0, "medium": 0, "hard": 0}},
-             "accurate": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": [],
+    stats = {"unified": {"recall": [0, 0], "mrr": [], "refuse": [0, 0], "lat": [],
                           "by_diff": {"easy": [0, 0], "medium": [0, 0], "hard": [0, 0]},
                           "by_diff_hit": {"easy": 0, "medium": 0, "hard": 0}}}
 
@@ -272,7 +269,7 @@ def main():
         diff = item.get("difficulty", "medium")
         print(f"[{i}/{len(DATASET)}] {q}  ({diff})")
         row = {"q": q, "expect": item["expect"], "note": item["note"], "difficulty": diff}
-        for mode in ("fast", "accurate"):
+        for mode in ("unified",):
             try:
                 r = call_chat(q, mode, api_key)
             except Exception as e:
@@ -341,8 +338,8 @@ def main():
         "",
         "### 逐题结果",
         "",
-        "| # | 难度 | 问题 | 期望 | 快速·Recall | 快速·拒答 | 精确·Recall | 精确·拒答 |",
-        "|---|---|---|---|---|---|---|---|",
+        "| # | 难度 | 问题 | 期望 | 统一检索·Recall | 统一检索·拒答 |",
+        "|---|---|---|---|---|---|",
     ]
     for i, row in enumerate(rows, 1):
         def cell(mode):
@@ -352,16 +349,14 @@ def main():
             rec, _, _ = retrieval_metrics(row["expect"], r)
             _, rj = refuse_metrics(row["expect"], r)
             return (str(rec) if rec is not None else "-", rj)
-        f_rec, f_rj = cell("fast")
-        a_rec, a_rj = cell("accurate")
+        recall, refusal = cell("unified")
         lines.append(
             f"| {i} | {row.get('difficulty','-')} | {row['q']} | {row['expect']} | "
-            f"{f_rec} | {f_rj} | {a_rec} | {a_rj} |"
+            f"{recall} | {refusal} |"
         )
     lines.append("")
     lines.append("### 汇总（按难度分层）")
-    lines.append(f"- 快速模式：{fmt(stats['fast'])}")
-    lines.append(f"- 精确模式：{fmt(stats['accurate'])}")
+    lines.append(f"- 统一检索：{fmt(stats['unified'])}")
     lines.append("")
     lines.append("### 说明")
     lines.append("- 检索层用 Recall@3 / MRR 衡量「正确来源是否进入 Top-3、排第几」，只表征**检索质量**，不等于回答准确率。")
@@ -372,8 +367,7 @@ def main():
         f.write("\n".join(lines))
 
     print("== 汇总 ==")
-    print("快速   " + fmt(stats["fast"]))
-    print("精确   " + fmt(stats["accurate"]))
+    print("统一检索 " + fmt(stats["unified"]))
     print(f"结果已保存：{out}")
     print("\n◆ 请人工复核每题的拒答/来源是否合理，再把这些数字写进简历/README。")
 

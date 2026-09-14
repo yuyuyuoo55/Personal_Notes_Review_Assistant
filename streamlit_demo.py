@@ -310,25 +310,6 @@ st.markdown(
     [data-testid="stMain"] [data-testid="stButton"] > button[kind="primary"]:hover {
         background: #426b55; border-color: #426b55;
     }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"] {
-        background: #4f8066; color: #ffffff; border: 1px solid #4f8066;
-        box-shadow: 0 3px 10px rgba(49, 93, 69, .16);
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="primary"]:hover {
-        background: #426f58; color: #ffffff; border-color: #426f58;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"] {
-        background: #f7f6f2; color: #4f5965; border: 1px solid #d7d4cf;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button[kind="secondary"]:hover {
-        background: #eeece7; color: #315d45; border-color: #b8c9bc;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button {
-        min-height: 3.2rem; border-radius: 14px; font-size: 1.02rem;
-    }
-    :is(.st-key-mode_fast, .st-key-mode_accurate) [data-testid="stButton"] > button p {
-        font-size: 1.02rem; font-weight: 750;
-    }
     [data-testid="stChatInput"] {
         height: 3.25rem; min-height: 3.25rem;
         background: #fffdf9; border: 1px solid var(--line); border-radius: 14px;
@@ -917,48 +898,11 @@ with chat_column:
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "retrieval_mode" not in st.session_state:
-        st.session_state.retrieval_mode = "fast"
     if "conversation_id" not in st.session_state:
         st.session_state.conversation_id = uuid4().hex
 
-    fast_column, accurate_column = st.columns(2, gap="small")
-    with fast_column:
-        if st.button(
-            "⚡ 快速模式",
-            key="mode_fast",
-            type="primary" if st.session_state.retrieval_mode == "fast" else "secondary",
-            use_container_width=True,
-        ):
-            if st.session_state.retrieval_mode != "fast":
-                if st.session_state.messages:
-                    st.session_state.messages.append(
-                        {"role": "mode", "content": "已切换到：快速模式（Agentic RAG）"}
-                    )
-                st.session_state.retrieval_mode = "fast"
-            st.rerun()
-    with accurate_column:
-        if st.button(
-            "🎯 精确查找",
-            key="mode_accurate",
-            type="primary" if st.session_state.retrieval_mode == "accurate" else "secondary",
-            use_container_width=True,
-        ):
-            if st.session_state.retrieval_mode != "accurate":
-                if st.session_state.messages:
-                    st.session_state.messages.append(
-                        {"role": "mode", "content": "已切换到：精确查找（Step RAG）"}
-                    )
-                st.session_state.retrieval_mode = "accurate"
-            st.rerun()
-
-    mode_descriptions = {
-        "fast": "当前链路：Agent 判断 →（直接回答 / 向量检索 Top-3）→ 基于片段回答　【线上主力 · 稳定】",
-        "accurate": ("当前链路：原问题 → 查询改写 → 向量 + BM25 → RRF → 回答　"
-                     "【云端无精排模型时自动降级：Cross-Encoder 精排一步会跳过】"),
-    }
     st.markdown(
-        f"<div class='mode-flow'>{mode_descriptions[st.session_state.retrieval_mode]}</div>",
+        "<div class='mode-flow'>统一检索：查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 基于笔记回答</div>",
         unsafe_allow_html=True,
     )
 
@@ -977,13 +921,6 @@ with chat_column:
             )
 
         for message in st.session_state.messages:
-            if message["role"] == "mode":
-                st.markdown(
-                    f"<div class='mode-history-divider'><span>{message['content']}</span></div>",
-                    unsafe_allow_html=True,
-                )
-                continue
-
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if message["role"] == "assistant":
@@ -1053,31 +990,29 @@ with chat_column:
 
                 try:
                     with st.status("正在理解问题并检索笔记…", expanded=True) as request_status:
-                        # 精确查找首次使用：提示精排模型准备。
                         # 部署环境若未安装 sentence_transformers / torch，精排会自动跳过，
-                        # 精确模式降级为「查询改写 + 向量/BM25 双路召回 + RRF 融合」，不阻塞。
-                        if st.session_state.retrieval_mode == "accurate":
-                            if _HAS_SENTENCE_TRANSFORMERS:
-                                preparing_reranker = True
-                                request_status.update(
-                                    label=(
-                                        "正在从本机缓存加载精排模型…"
-                                        if is_reranker_cached()
-                                        else "首次使用：正在准备精排模型…"
-                                    ),
-                                    state="running",
-                                )
-                                get_reranker_model()
-                                preparing_reranker = False
-                                request_status.update(
-                                    label="精排模型已就绪，正在执行完整检索…",
-                                    state="running",
-                                )
-                            else:
-                                request_status.update(
-                                    label="精排模型未安装，精确模式将降级为混合检索+RRF 融合…",
-                                    state="running",
-                                )
+                        # 统一链路在无精排依赖时降级为「混合检索 + RRF」，不阻塞回答。
+                        if _HAS_SENTENCE_TRANSFORMERS:
+                            preparing_reranker = True
+                            request_status.update(
+                                label=(
+                                    "正在从本机缓存加载精排模型…"
+                                    if is_reranker_cached()
+                                    else "首次使用：正在准备精排模型…"
+                                ),
+                                state="running",
+                            )
+                            get_reranker_model()
+                            preparing_reranker = False
+                            request_status.update(
+                                label="精排模型已就绪，正在执行完整检索…",
+                                state="running",
+                            )
+                        else:
+                            request_status.update(
+                                label="精排模型未安装，将使用混合检索 + RRF 融合…",
+                                state="running",
+                            )
 
                         if uploaded_chat_image:
                             request_status.update(
@@ -1095,7 +1030,6 @@ with chat_column:
                             # 最终回答仍只使用检索到的笔记资料。
                             preparation = prepare_rag_answer(
                                 original_query=question,
-                                mode=st.session_state.retrieval_mode,
                                 conversation_id=st.session_state.conversation_id,
                                 api_key=st.session_state.deepseek_api_key,
                                 retrieval_hint=f"图片内容：{description}",
@@ -1103,12 +1037,11 @@ with chat_column:
                         else:
                             preparation = prepare_rag_answer(
                                 original_query=question,
-                                mode=st.session_state.retrieval_mode,
                                 conversation_id=st.session_state.conversation_id,
                                 api_key=st.session_state.deepseek_api_key,
                             )
 
-                        # 精确查找在生成前已有最终来源；快速模式在工具节点后才有来源。
+                        # 统一检索在生成回答前已经得到最终来源。
                         if preparation is not None and preparation.sources:
                             sources = preparation.sources
                             request_status.update(
@@ -1174,18 +1107,11 @@ with chat_column:
                 st.rerun()
 
 with focus_column:
-    if st.session_state.get("retrieval_mode", "fast") == "fast":
-        mode_now = "快速模式 · Agentic RAG"
-        mode_icon = "⚡"
-        mode_chain = "Agent 判断 → 按需向量检索 Top-3 → 基于片段回答"
-        mode_scenarios = ["日常复习与普通追问", "希望更快得到回答的短对话"]
-        mode_features = ["延迟通常更低", "弱关键词或精确术语可能漏召回"]
-    else:
-        mode_now = "精确查找 · Step RAG"
-        mode_icon = "🎯"
-        mode_chain = "查询改写 → 向量 Top-6 + BM25 Top-6 → RRF 融合 → Cross-Encoder 精排 Top-3 → 回答"
-        mode_scenarios = ["术语、命令与原文定位", "需要更稳定召回和准确来源"]
-        mode_features = ["召回更全面，耗时通常更高", "云端无精排模型时自动降级为 RRF Top-3"]
+    mode_now = "统一混合检索"
+    mode_icon = "🎯"
+    mode_chain = "查询改写 → 向量 Top-6 + BM25 Top-6 → RRF 融合 → Cross-Encoder 精排 Top-3 → 回答"
+    mode_scenarios = ["日常复习与术语查找", "需要稳定召回和可追溯来源"]
+    mode_features = ["用户无需选择模式", "云端无精排模型时自动降级为 RRF Top-3"]
     st.markdown(
         f"""
         <div class='focus-card'>

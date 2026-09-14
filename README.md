@@ -26,7 +26,7 @@
 ## 项目亮点
 
 - **回答可追溯**：答案附带来源文件、标题路径和原文片段，不只返回模型文本。
-- **两条检索链路**：快速模式由 Agent 按需检索；精确模式固定执行混合检索与精排。
+- **统一检索链路**：系统固定执行查询改写、混合召回、融合与精排，用户无需选择模式。
 - **面向中文笔记**：BM25 使用 `pkuseg` 分词，并与向量检索进行 RRF 排名融合。
 - **资料不足拒答**：检索结果不可靠时提示补充笔记，不使用联网知识强行回答。
 - **本地数据持久化**：原始 Markdown、导入图片、Chroma 向量索引和 BM25 索引均保存在本机。
@@ -38,20 +38,17 @@
 
 当前支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。章节小测、通用批量导入、笔记更新和多用户能力尚未实现。
 
-## 双模式设计
+## 统一检索设计
 
-| 模式 | 真实链路 | 适用场景 | 主要取舍 |
-| --- | --- | --- | --- |
-| 快速模式 `fast` | Agent 判断是否检索 → Chroma 向量 Top-3 → 基于片段回答 | 日常复习、普通追问、短对话 | 延迟较低，但弱关键词问题可能漏召回 |
-| 精确查找 `accurate` | 查询改写 → 向量 Top-6 + BM25 Top-6 → RRF → Cross-Encoder → Top-3 → 生成 | 术语查找、命令定位、强调来源的问题 | 召回更稳，但首次需下载精排模型，耗时更高 |
+当前所有问题统一执行：查询改写 → 向量 Top-6 + BM25 Top-6 → RRF → Cross-Encoder → Top-3 → 基于笔记生成。聊天图片的描述只会扩充检索查询，不作为最终回答依据。旧客户端传入 `fast` 或 `accurate` 时仍可兼容，但实际执行链路相同。
 
-快速模式具有进程内会话记忆；精确模式每次固定执行完整链路，不使用会话记忆。
+项目早期曾提供快速和精确两种模式，并用固定题集做过对比。后来考虑到用户难以判断该选哪一种，而复习场景更需要稳定、可追溯的结果，因此取消前端模式选择并统一为固定工作流；历史评测数据仍保留为这次产品决策的依据。
 
 ## 页面功能
 
 | 页面 | 主要功能 |
 | --- | --- |
-| 智能问答 | 快速/精确模式切换、文本或图片提问、流式回答、来源追溯和耗时展示 |
+| 智能问答 | 统一混合检索、文本或图片辅助提问、流式回答、来源追溯和耗时展示 |
 | 知识库 | 导入 Markdown、图文 ZIP 或单张图片，查看文件类型、导入时间和片段数，支持删除与清空 |
 | 数据看板 | 查看笔记规模、片段分布和文档类型占比 |
 | 设置 | 在当前会话内验证或清除 DeepSeek Key，并自动显示当前总余额 |
@@ -91,21 +88,17 @@ flowchart LR
     INGEST --> EMB[DashScope Embedding]
     EMB --> CHROMA[(Chroma)]
 
-    API --> MODE{检索模式}
+    API --> QUESTION[用户问题]
     API -->|聊天图片| VISION[DeepSeek Vision 生成描述]
     VISION --> HINT[图片描述辅助检索]
-    HINT --> MODE
-    MODE -->|快速模式| AGENT[LangChain Agent]
-    AGENT -->|按需调用工具| VECTOR[向量检索 Top-3]
-
-    MODE -->|精确查找| REWRITE[查询改写]
+    HINT --> REWRITE[查询改写]
+    QUESTION --> REWRITE
     REWRITE --> DENSE[向量检索 Top-6]
     REWRITE --> BM25[BM25 Top-6]
     DENSE --> RRF[RRF 融合]
     BM25 --> RRF
     RRF --> RERANK[Cross-Encoder 精排 Top-3]
 
-    VECTOR --> LLM[DeepSeek 生成]
     RERANK --> LLM
     VISION --> API
     LLM --> API
@@ -125,7 +118,7 @@ flowchart LR
     H --> D[生成稳定 chunk_id]
     D --> E[DashScope Embedding]
     E --> F[写入 Chroma]
-    F --> G[下次精确查询时重建 BM25]
+    F --> G[下次查询时重建 BM25]
 ```
 
 ## 核心代码地图
@@ -134,15 +127,15 @@ flowchart LR
 | --- | --- | --- |
 | API 入口 | `backend/app/main.py` | 注册健康检查、笔记、问答、Key 与余额路由 |
 | 笔记导入 | `backend/app/api/notes.py` | 上传校验、保存、切分、向量化与失败回滚 |
-| 双模式编排 | `backend/app/services/rag_service.py` | 快速/精确分流、阈值判断、混合检索与生成 |
-| 快速 Agent | `backend/app/services/agent_service.py` | 工具调用、向量 Top-3、会话记忆和流式事件 |
+| 统一检索编排 | `backend/app/services/rag_service.py` | 查询改写、阈值判断、混合检索、精排与生成 |
+| 历史 Agent 实现 | `backend/app/services/agent_service.py` | 保留早期快速模式实现，当前问答链路不再调用 |
 | Markdown 切分 | `backend/app/services/note_splitter.py` | 标题感知切分和稳定 `chunk_id` |
 | 混合检索 | `bm25_retriever.py` / `rrf_fusion.py` | 中文关键词召回与排名融合 |
 | 精排 | `backend/app/services/reranker.py` | `BAAI/bge-reranker-base` Cross-Encoder 精排 |
 | 向量存储 | `backend/app/storage/vector_store.py` | DashScope Embedding 和 Chroma 持久化 |
 | Key 与余额 | `backend/app/api/key_validate.py` | 请求级 Key 验证和 DeepSeek 当前余额查询 |
 | 前端 | `streamlit_demo.py` | 顶部多页导航、导入、问答、来源卡片、余额和数据看板 |
-| 回归评测 | `eval_10questions.py` | 双模式逐题请求、规则判定和 Markdown 报告生成 |
+| 回归评测 | `eval_rag.py` | 统一链路的 31 题检索、拒答、延迟与 Markdown 报告生成 |
 
 ## 回归评测
 
@@ -159,9 +152,9 @@ flowchart LR
 
 ### 三层评测（最新，`eval_rag.py`）
 
-`eval_rag.py` 做「检索层 + 生成层 + 应用层」三层评测：固定 31 道题（覆盖 Git/Docker/Linux/Maven/Vue + 拒答边界题，分 easy/medium/hard 三档难度），对快速 / 精确两种模式各问一遍，自动判定 Recall@3、MRR、拒答和延迟；忠实度用 DeepSeek 作裁判（LLM-as-judge，仅作定性参考）。
+`eval_rag.py` 做「检索层 + 生成层 + 应用层」三层评测：固定 31 道题（覆盖 Git/Docker/Linux/Maven/Vue + 拒答边界题，分 easy/medium/hard 三档难度），对当前统一检索链路逐题测试，自动判定 Recall@3、MRR、拒答和延迟；忠实度用 DeepSeek 作裁判（LLM-as-judge，仅作定性参考）。
 
-一次本机评测快照（2026-09-13）：
+合并前的本机双模式基线（2026-09-13）：
 
 | 模式 | Recall@3 | MRR | 拒答 | 平均延迟 |
 | --- | ---: | ---: | ---: | ---: |
@@ -170,7 +163,7 @@ flowchart LR
 
 **按难度分层**（来源命中题）：两种模式在 easy / medium / hard 三档均为满分（easy 5/5、medium 18/18、hard 5/5）。
 
-**说明**：表格来自 2026-09-13 的最新本地回归。31 题里 28 道为「来源命中」题、3 道为「应拒答」题，两种模式的 Recall@3 均为满分；本轮拒答均为 2/3。精确模式曾在 2026-09-08 跑出 3/3，但最新两轮 Redis 边界题均未拒答，说明生成层存在模型波动，不能把 3/3 当作稳定能力。忠实度由 LLM 裁判评估，仅作定性参考，不视为生产指标。
+**说明**：这组数据是统一链路上线前的对比基线，不代表当前存在两个可选模式。31 题里 28 道为「来源命中」题、3 道为「应拒答」题；本轮两种旧模式拒答均为 2/3。精确模式曾在 2026-09-08 跑出 3/3，但没有稳定复现，说明生成层存在模型波动。统一链路的新快照将在本次改造后重新生成。
 
 > 均为本地固定题集、小规模、人工复核，不等同于线上生产指标。
 
@@ -199,7 +192,7 @@ uv run python eval_10questions.py
 - [uv](https://docs.astral.sh/uv/)
 - 可访问 DeepSeek、DashScope 和 Hugging Face
 
-默认轻量依赖会让精确模式降级为“混合检索 + RRF”。如需 Cross-Encoder 精排，请按 `requirements.txt` 顶部注释安装 `sentence-transformers` 和 `torch`；首次使用会下载 `BAAI/bge-reranker-base`。
+默认轻量依赖会让统一链路降级为“混合检索 + RRF”。如需 Cross-Encoder 精排，请按 `requirements.txt` 顶部注释安装 `sentence-transformers` 和 `torch`；首次使用会下载 `BAAI/bge-reranker-base`。
 
 ### 2. 克隆并安装依赖
 
@@ -265,7 +258,7 @@ uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 
 2. 进入“知识库”，上传一份非空 `.md` 笔记、一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片，或一个包含一份 Markdown 与配套图片的 `.zip`。
 3. 文档包含本地图片时，建议将图片放入 Markdown 同级的 `images/` 目录，并保持 `![说明](images/文件名.png)` 相对路径后整体压缩为 ZIP。
 4. 点击“导入文件”，等待图片描述、切分与向量化完成。旧文档中的本地绝对路径会在 ZIP 内按唯一文件名尝试匹配。
-5. 返回“智能问答”，选择“快速模式”或“精确查找”，输入问题查看回答与来源。
+5. 返回“智能问答”，直接输入问题查看回答与来源，系统会自动执行统一检索。
 6. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会用图片描述辅助检索，最终回答只依据命中的笔记资料。没有可靠笔记时会明确提示资料不足。
 7. 进入“数据看板”，查看笔记总数、片段分布和资料类型占比。
 
@@ -298,7 +291,8 @@ Personal_Notes_Review_Assistant/
 ├─ frontend/app.py            # FastAPI 分离部署版前端（保留）
 ├─ tests/                     # 工程烟雾测试
 ├─ docs/images/               # README 展示图片
-├─ eval_10questions.py        # 双模式回归脚本
+├─ eval_rag.py                # 当前统一链路 31 题回归脚本
+├─ eval_10questions.py        # 历史双模式回归脚本
 ├─ eval_result_*.md           # 单次评测快照
 ├─ start_all.ps1              # Windows 启动器
 ├─ 启动项目.cmd               # 双击入口
@@ -315,8 +309,8 @@ Personal_Notes_Review_Assistant/
 | `GET` | `/api/health` | 健康检查 |
 | `GET` | `/api/notes` | 查询已导入笔记及片段数 |
 | `POST` | `/api/notes/import` | 上传 `.md`、图文 `.zip` 或单张图片，表单字段名为 `file` |
-| `POST` | `/api/chat` | SSE 问答；支持 `fast` / `accurate` 模式 |
-| `POST` | `/api/chat/image` | multipart 图片 RAG；字段为 `query`、`image`、`mode` 和 `conversation_id` |
+| `POST` | `/api/chat` | SSE 问答；默认执行统一混合检索 |
+| `POST` | `/api/chat/image` | multipart 图片辅助检索；字段为 `query`、`image` 和兼容字段 `conversation_id` |
 | `POST` | `/api/key/validate` | 验证请求头中的 DeepSeek Key，不保存 Key |
 | `GET` | `/api/key/balance` | 查询当前 DeepSeek 总余额，不保存 Key |
 
@@ -331,7 +325,6 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 ```json
 {
   "query": "Git 的分支有什么用？",
-  "mode": "accurate",
   "conversation_id": "your-session-id"
 }
 ```
@@ -341,8 +334,8 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 - 支持单个 Markdown、单张图片或“一份 Markdown + 配套图片”的 ZIP；暂不支持 RAR、PDF、通用批量导入和更新。
 - 单个 `.md` 无法携带用户电脑上的本地图片文件；文档图片增强支持公网 HTTPS 图片和 data URI，本地绝对路径会提示后跳过。
 - 本地保存或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
-- 快速模式会话记忆保存在进程内，后端重启后清空。
-- 精确模式的 Cross-Encoder 首次加载较慢，且当前没有最低精排分阈值。
+- 当前统一链路不使用多轮会话记忆，每个问题都基于本次查询和笔记回答。
+- Cross-Encoder 首次加载较慢，且当前没有最低精排分阈值。
 - 自动评测依赖特定测试笔记，固定分数不能直接迁移到其他知识库。
 - 当前没有用户系统、权限隔离、云端同步或生产部署配置。
 - 章节小测仍是界面中的下一阶段规划，不属于已实现能力。
