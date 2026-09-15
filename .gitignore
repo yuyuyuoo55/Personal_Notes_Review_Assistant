@@ -18,6 +18,8 @@ push_err.txt
 .pytest_tmp/
 .tmp_verify/
 _verify_mm.py
+/.dsh_qa/
+/_archive/
 
 # 个人隐私 / 本地文件，不要进仓库
 *.pdf

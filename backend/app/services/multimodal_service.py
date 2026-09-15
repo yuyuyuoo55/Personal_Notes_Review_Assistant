@@ -34,6 +34,8 @@ from backend.app.core.config import (
 ALLOWED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 COMPRESS_MAX_EDGE = 1600
 COMPRESS_TARGET_BYTES = 2 * 1024 * 1024
+MAX_IMAGE_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_IMAGE_PIXELS = 40_000_000
 
 
 class ImageProcessingError(RuntimeError):
@@ -44,11 +46,16 @@ class InvalidApiKeyError(ImageProcessingError):
     """用户 Key 无效；该错误不能回退为部署者付费模型。"""
 
 
-def validate_image(image_bytes: bytes, content_type: str | None) -> str:
+def validate_image(
+    image_bytes: bytes,
+    content_type: str | None,
+    *,
+    max_bytes: int = MAX_IMAGE_BYTES,
+) -> str:
     """限制图片类型和大小；返回可用于 data URL/OSS 的 MIME。"""
     if not image_bytes:
         raise ImageProcessingError("图片内容为空")
-    if len(image_bytes) > MAX_IMAGE_BYTES:
+    if len(image_bytes) > max_bytes:
         raise ImageProcessingError("图片过大，已跳过")
 
     mime = (content_type or "").split(";", 1)[0].lower()
@@ -91,6 +98,8 @@ def _maybe_compress_image(image_bytes: bytes, content_type: str) -> bytes:
             return image_bytes
 
         with Image.open(io.BytesIO(image_bytes)) as opened:
+            if opened.width * opened.height > MAX_IMAGE_PIXELS:
+                raise ImageProcessingError("图片像素尺寸过大，已跳过")
             image = ImageOps.exif_transpose(opened)
             if max(image.size) <= COMPRESS_MAX_EDGE and len(image_bytes) <= COMPRESS_TARGET_BYTES:
                 return image_bytes
@@ -121,8 +130,18 @@ def _maybe_compress_image(image_bytes: bytes, content_type: str) -> bytes:
                     Image.Resampling.LANCZOS,
                 )
             return best
+    except ImageProcessingError:
+        raise
     except Exception:
         return image_bytes
+
+
+def prepare_image_for_model(image_bytes: bytes, content_type: str | None) -> tuple[bytes, str]:
+    """先校验原图硬上限，再压缩并校验模型载荷上限。"""
+    mime = validate_image(image_bytes, content_type, max_bytes=MAX_IMAGE_UPLOAD_BYTES)
+    compressed = _maybe_compress_image(image_bytes, mime)
+    validate_image(compressed, mime, max_bytes=MAX_IMAGE_BYTES)
+    return compressed, mime
 
 
 def save_image_to_local(image_bytes: bytes, content_type: str, doc_dir: str | Path) -> str:
@@ -157,9 +176,8 @@ async def build_image_chunk(
     """Save one standalone image, describe it with Vision, and build a RAG chunk."""
     local_path: str | None = None
     try:
-        validate_image(image_bytes, content_type)
-        image_bytes = await asyncio.to_thread(
-            _maybe_compress_image, image_bytes, content_type
+        image_bytes, content_type = await asyncio.to_thread(
+            prepare_image_for_model, image_bytes, content_type
         )
         local_path = await asyncio.to_thread(
             save_image_to_local, image_bytes, content_type, doc_dir

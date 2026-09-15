@@ -18,7 +18,6 @@ class NoteSummary(BaseModel):
     file_name: str # 前端展示的笔记文件名
     chunk_count: int # 该笔记当前包含的 Chunk 数量
     kind: Literal["md", "image"]
-    source: str
     doc_id: str | None = None
     imported_at: str
 

@@ -11,10 +11,9 @@ from backend.app.schemas.chat import ChatRequest
 from backend.app.core.auth import require_user_deepseek_api_key
 from backend.app.services.multimodal_service import (
     ImageProcessingError,
-    _maybe_compress_image,
     describe_image_url,
     image_data_url,
-    validate_image,
+    prepare_image_for_model,
 )
 from backend.app.services.rag_service import (
     UNIFIED_MODE,
@@ -131,7 +130,7 @@ def chat(
 
 @router.post("/image")
 async def chat_with_image(
-    query: str = Form(..., min_length=1, max_length=500),
+    query: str = Form("", max_length=500),
     mode: str = Form("unified"),
     conversation_id: str = Form(""),
     image: UploadFile = File(...),
@@ -142,8 +141,8 @@ async def chat_with_image(
     content_type = image.content_type or "application/octet-stream"
 
     try:
-        mime = validate_image(image_bytes, content_type)
-        compressed_image = _maybe_compress_image(image_bytes, mime)
+        query = query.strip() or "请根据这张图片涉及的主题，从我的笔记中检索相关内容并简要说明。"
+        compressed_image, mime = prepare_image_for_model(image_bytes, content_type)
         description = await describe_image_url(
             image_data_url(compressed_image, mime),
             api_key,

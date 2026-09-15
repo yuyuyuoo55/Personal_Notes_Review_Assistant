@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any
+from functools import lru_cache
 
 import bm25s
 from langchain_core.documents import Document
@@ -19,6 +20,14 @@ from backend.app.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+@lru_cache(maxsize=1)
+def get_segmenter():
+    """复用初始化较慢的中文切词器。"""
+    if not _HAS_PKUSEG:
+        return None
+    return pkuseg.pkuseg()
+
+
 def bm25_retriever(
     query: str,
     chunks_list: list[Document],
@@ -35,7 +44,7 @@ def bm25_retriever(
     if not _HAS_PKUSEG:
         logger.info("pkuseg 不可用，跳过 BM25 关键词检索（精确查找将退回仅向量融合）")
         return []
-    segmenter = pkuseg.pkuseg()
+    segmenter = get_segmenter()
 
     # 3. 判断本地是否已有索引；有且不要求重建时，直接加载。
     if index_file.exists() and not force_rebuild:

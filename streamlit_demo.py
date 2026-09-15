@@ -65,13 +65,13 @@ except Exception:  # st.secrets 在无 Secrets 文件时抛异常，忽略即可
 from backend.app.core.config import UPLOAD_DIRECTORY  # noqa: E402
 from backend.app.services.markdown_image_service import enrich_markdown_images  # noqa: E402
 from backend.app.services.markdown_bundle_service import read_markdown_bundle  # noqa: E402
+from backend.app.services.basic_chat import get_basic_chat_response  # noqa: E402
 from backend.app.services.multimodal_service import (  # noqa: E402
     ImageProcessingError,
-    _maybe_compress_image,
     build_image_chunk,
     describe_image_url,
     image_data_url,
-    validate_image,
+    prepare_image_for_model,
 )
 # validate_deepseek_api_key 用于"验证 Key"按钮；若云端该版本暂缺此函数，
 # 降级为"验证 Key"按钮不可用，但 app 本体仍能正常启动和展示，不整体崩溃。
@@ -102,6 +102,7 @@ from backend.app.services.rag_service import (  # noqa: E402
     is_reranker_cached,
     prepare_rag_answer,
 )
+from backend.app.services.quiz_service import generate_quiz_questions, grade_quiz_answers  # noqa: E402
 from backend.app.services.reranker import _HAS_SENTENCE_TRANSFORMERS  # noqa: E402
 from backend.app.storage.vector_store import knowledge_to_vector, vector_store  # noqa: E402
 
@@ -148,6 +149,334 @@ def list_notes() -> list[dict]:
             }
         )
     return notes
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def list_quiz_chapters(source: str, modified_at: float) -> list[str]:
+    """从 Markdown 的真实标题元数据中生成章节选项。"""
+    del modified_at
+    chapters: list[str] = ["整篇笔记"]
+    seen: set[str] = set(chapters)
+    for chunk in split_documents(load_notes(source)):
+        header_path = [
+            str(chunk.metadata[name])
+            for name in ("Header 1", "Header 2", "Header 3")
+            if chunk.metadata.get(name)
+        ]
+        label = " > ".join(header_path)
+        if label and label not in seen:
+            seen.add(label)
+            chapters.append(label)
+    return chapters
+
+
+def reset_quiz_preview() -> None:
+    """保留所选配置，清空当前预览作答进度。"""
+    st.session_state.quiz_phase = "setup"
+    st.session_state.quiz_questions = []
+    st.session_state.quiz_current_index = 0
+    st.session_state.quiz_answers = {}
+    st.session_state.quiz_grades = []
+    st.session_state.quiz_review = []
+    st.session_state.quiz_generation_elapsed_ms = 0
+    st.session_state.quiz_generation_cached = False
+    st.session_state.quiz_generation_model_calls = 0
+    st.session_state.quiz_generation_call_elapsed_ms = []
+    st.session_state.quiz_generation_request_mode = ""
+    for key in list(st.session_state):
+        if key.startswith("quiz_answer_widget_"):
+            del st.session_state[key]
+
+
+def persist_quiz_answer(index: int) -> None:
+    """把当前题输入从临时组件状态同步到跨页面保留的答案字典。"""
+    widget_key = f"quiz_answer_widget_{index}"
+    answers = dict(st.session_state.get("quiz_answers", {}))
+    answers[index] = st.session_state.get(widget_key, "") or ""
+    st.session_state.quiz_answers = answers
+
+
+def render_quiz_preview(notes: list[dict], has_api_key: bool) -> None:
+    """渲染基于笔记原文出题的章节小测。"""
+    question_schema_version = 10
+    defaults = {
+        "quiz_phase": "setup",
+        "quiz_questions": [],
+        "quiz_current_index": 0,
+        "quiz_answers": {},
+        "quiz_grades": [],
+        "quiz_review": [],
+        "quiz_generation_cache": {},
+        "quiz_generation_elapsed_ms": 0,
+        "quiz_generation_cached": False,
+        "quiz_generation_model_calls": 0,
+        "quiz_generation_call_elapsed_ms": [],
+        "quiz_generation_request_mode": "",
+        "quiz_selected_chapter": "整篇笔记",
+        "quiz_active_note": "",
+        "quiz_active_chapter": "",
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    if st.session_state.get("quiz_question_schema_version") != question_schema_version:
+        reset_quiz_preview()
+        st.session_state.quiz_question_schema_version = question_schema_version
+
+    # 未验证 Key 时不允许停留在答题或结果阶段，避免“看起来能够使用”的假状态。
+    if not has_api_key and st.session_state.quiz_phase != "setup":
+        reset_quiz_preview()
+
+    eligible_notes = [note for note in notes if note.get("kind") == "md"]
+    setup_column, guide_column = st.columns([2.1, 1], gap="large")
+
+    if st.session_state.quiz_phase == "setup":
+        with setup_column:
+            st.markdown("<div class='section-title'>创建章节小测</div>", unsafe_allow_html=True)
+            st.caption("选择复习范围后，AI 会分析原文并生成有依据的题目。")
+            if not eligible_notes:
+                st.info("请先在知识库导入至少一份 Markdown 笔记。")
+                return
+
+            labels = [note["file_name"] for note in eligible_notes]
+            selected_label = st.selectbox(
+                "选择笔记",
+                labels,
+                key="quiz_selected_note",
+                on_change=reset_quiz_preview,
+            )
+            selected_note = next(note for note in eligible_notes if note["file_name"] == selected_label)
+            source = Path(selected_note["source"])
+            chapters = list_quiz_chapters(str(source), source.stat().st_mtime)
+            if st.session_state.quiz_selected_chapter not in chapters:
+                st.session_state.quiz_selected_chapter = chapters[0]
+            st.selectbox(
+                "选择章节",
+                chapters,
+                key="quiz_selected_chapter",
+            )
+
+            st.markdown(
+                "<div class='quiz-note'>固定 3 题：2 道单选题 + 1 道简答题　·　答案均可追溯到所选原文</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "生成并开始小测",
+                type="primary",
+                use_container_width=True,
+                disabled=not has_api_key,
+            ):
+                try:
+                    chapter = st.session_state.quiz_selected_chapter
+                    cache_key = sha256(
+                        f"{source.resolve()}:{source.stat().st_mtime_ns}:{chapter}:quiz-v10".encode("utf-8")
+                    ).hexdigest()
+                    generated_questions = st.session_state.quiz_generation_cache.get(cache_key)
+                    generation_started_at = perf_counter()
+                    used_cache = generated_questions is not None
+                    generation_diagnostics: dict = {}
+                    if generated_questions is None:
+                        with st.spinner("正在分析笔记并生成小测题……", show_time=True):
+                            generated_questions = generate_quiz_questions(
+                                source=str(source),
+                                chapter=chapter,
+                                api_key=st.session_state.deepseek_api_key,
+                                diagnostics=generation_diagnostics,
+                            )
+                        st.session_state.quiz_generation_cache[cache_key] = generated_questions
+                    st.session_state.quiz_active_note = selected_label
+                    st.session_state.quiz_active_chapter = chapter
+                    st.session_state.quiz_questions = generated_questions
+                    st.session_state.quiz_current_index = 0
+                    st.session_state.quiz_answers = {}
+                    st.session_state.quiz_grades = []
+                    st.session_state.quiz_review = []
+                    st.session_state.quiz_generation_elapsed_ms = round(
+                        (perf_counter() - generation_started_at) * 1000
+                    )
+                    st.session_state.quiz_generation_cached = used_cache
+                    st.session_state.quiz_generation_model_calls = generation_diagnostics.get("model_calls", 0)
+                    st.session_state.quiz_generation_call_elapsed_ms = generation_diagnostics.get(
+                        "call_elapsed_ms", []
+                    )
+                    st.session_state.quiz_generation_request_mode = generation_diagnostics.get("request_mode", "")
+                    st.session_state.quiz_phase = "answering"
+                    st.rerun()
+                except ValueError as error:
+                    st.error(str(error))
+                except Exception:
+                    st.error("小测生成失败，请稍后重试。")
+
+        with guide_column:
+            st.markdown(
+                """
+                <div class='focus-card'>
+                    <strong>小测流程</strong>
+                    <div class='detail-label'>1 · 选择范围</div><span>从真实 Markdown 标题中选择章节。</span>
+                    <div class='detail-label'>2 · 逐题作答</div><span>一次只看一道题，降低复习负担。</span>
+                    <div class='detail-label'>3 · 依据校验</div><span>每道题的答案依据都必须真实存在于原文。</span>
+                    <div class='detail-label'>4 · 评分复盘</div><span>查看总分、逐题反馈、参考答案和原文依据。</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        return
+
+    questions = st.session_state.quiz_questions
+    current_index = st.session_state.quiz_current_index
+
+    if st.session_state.quiz_phase == "answering":
+        with setup_column:
+            st.markdown(
+                f"<div class='section-title'>第 {current_index + 1} / {len(questions)} 题</div>",
+                unsafe_allow_html=True,
+            )
+            st.progress((current_index + 1) / len(questions))
+            current_question = questions[current_index]
+            question_type_label = "单选题" if current_question["question_type"] == "single_choice" else "简答题"
+            st.markdown(
+                f"<div class='quiz-question'><span>{question_type_label}</span><strong>{escape(current_question['question'])}</strong></div>",
+                unsafe_allow_html=True,
+            )
+            answer_widget_key = f"quiz_answer_widget_{current_index}"
+            if answer_widget_key not in st.session_state:
+                saved_value = st.session_state.quiz_answers.get(current_index, "")
+                st.session_state[answer_widget_key] = (
+                    saved_value or None
+                    if current_question["question_type"] == "single_choice"
+                    else saved_value
+                )
+            if current_question["question_type"] == "single_choice":
+                answer_value = st.radio(
+                    "请选择答案",
+                    options=["A", "B", "C", "D"],
+                    index=None,
+                    format_func=lambda option: f"{option}. {current_question['options'][option]}",
+                    key=answer_widget_key,
+                    on_change=persist_quiz_answer,
+                    args=(current_index,),
+                )
+            else:
+                answer_value = st.text_area(
+                    "你的回答",
+                    height=180,
+                    placeholder="不用背标准答案，先用自己的话讲清楚……",
+                    key=answer_widget_key,
+                    on_change=persist_quiz_answer,
+                    args=(current_index,),
+                )
+            st.session_state.quiz_answers[current_index] = answer_value or ""
+            previous_column, next_column = st.columns(2, gap="medium")
+            with previous_column:
+                if st.button("上一题", disabled=current_index == 0, use_container_width=True):
+                    persist_quiz_answer(current_index)
+                    st.session_state.quiz_current_index -= 1
+                    st.rerun()
+            with next_column:
+                if current_index < len(questions) - 1:
+                    if st.button("下一题", type="primary", use_container_width=True):
+                        persist_quiz_answer(current_index)
+                        st.session_state.quiz_current_index += 1
+                        st.rerun()
+                elif st.button("提交小测", type="primary", use_container_width=True):
+                    persist_quiz_answer(current_index)
+                    try:
+                        with st.spinner("正在根据笔记依据评分……", show_time=True):
+                            st.session_state.quiz_grades = grade_quiz_answers(
+                                questions=questions,
+                                answers=st.session_state.quiz_answers,
+                                api_key=st.session_state.deepseek_api_key,
+                            )
+                        grading_result = st.session_state.quiz_grades
+                        st.session_state.quiz_grades = grading_result["grades"]
+                        st.session_state.quiz_review = grading_result["review"]
+                        st.session_state.quiz_phase = "result"
+                        st.rerun()
+                    except ValueError as error:
+                        st.error(str(error))
+                    except Exception:
+                        st.error("小测评分失败，请稍后重新提交。")
+
+        with guide_column:
+            answered = sum(bool(str(st.session_state.quiz_answers.get(index, "")).strip()) for index in range(len(questions)))
+            generation_note = (
+                "已复用本次会话缓存"
+                if st.session_state.quiz_generation_cached
+                else (
+                    f"生成耗时 {st.session_state.quiz_generation_elapsed_ms / 1000:.2f} 秒"
+                    f" · 模型调用 {st.session_state.quiz_generation_model_calls} 次"
+                    f" · {escape(st.session_state.quiz_generation_request_mode)}"
+                )
+            )
+            st.markdown(
+                f"<div class='focus-card'><strong>本次进度</strong><span>{escape(st.session_state.quiz_active_note)}<br>{escape(st.session_state.quiz_active_chapter)}<br>{generation_note}</span><div class='mode-badge'>已作答 {answered} / {len(questions)}</div></div>",
+                unsafe_allow_html=True,
+            )
+        return
+
+    with setup_column:
+        answered = sum(bool(str(st.session_state.quiz_answers.get(index, "")).strip()) for index in range(len(questions)))
+        grades = st.session_state.quiz_grades
+        review = st.session_state.quiz_review
+        total_score = round(sum(grade["score"] for grade in grades) / len(grades)) if grades else 0
+        supported_count = sum(grade["verdict"] == "笔记支持" for grade in grades)
+        st.markdown("<div class='section-title'>小测结果</div>", unsafe_allow_html=True)
+        st.info("评分只判断回答是否被所选笔记支持，不判断笔记之外的事实是否正确。")
+        metric_a, metric_b, metric_c = st.columns(3)
+        metric_a.metric("总分", f"{total_score} / 100")
+        metric_b.metric("已作答", answered)
+        metric_c.metric("笔记支持", f"{supported_count} / {len(questions)}")
+        point_tab, mistake_tab, memory_tab = st.tabs(["核心考点", "易错点", "记忆方法"])
+        with point_tab:
+            for index, item in enumerate(review, start=1):
+                st.markdown(f"**{index}. {item['core_point']}**")
+                st.caption(f"对应题目：{questions[index - 1]['question']}")
+        with mistake_tab:
+            for index, item in enumerate(review, start=1):
+                st.markdown(f"**{index}. {item['common_mistake']}**")
+                st.caption(f"对应题目：{questions[index - 1]['question']}")
+        with memory_tab:
+            for index, item in enumerate(review, start=1):
+                st.markdown(f"**{index}. {item['memory_tip']}**")
+                st.caption(f"对应题目：{questions[index - 1]['question']}")
+        st.markdown("### 逐题复盘")
+        for index, question in enumerate(questions):
+            grade = grades[index] if index < len(grades) else {
+                "score": 0,
+                "verdict": "评分缺失",
+                "feedback": "本题暂未获得评分。",
+            }
+            with st.expander(
+                f"第 {index + 1} 题 · {grade['verdict']} · {grade['score']} 分",
+                expanded=index == 0,
+            ):
+                st.markdown(f"**{question['question']}**")
+                st.markdown("**你的回答：**")
+                saved_answer = st.session_state.quiz_answers.get(index, "")
+                if question["question_type"] == "single_choice" and saved_answer:
+                    saved_answer = f"{saved_answer}. {question['options'][saved_answer]}"
+                st.write(saved_answer or "（未作答）")
+                st.markdown(f"**评分反馈：** {grade['feedback']}")
+                st.markdown(f"**参考答案：** {question['reference_answer']}")
+                st.markdown("**笔记依据：**")
+                for evidence in question["evidence"]:
+                    st.caption(f"“{evidence}”")
+        retry_column, setup_again_column = st.columns(2, gap="medium")
+        with retry_column:
+            if st.button("再测一次", type="primary", use_container_width=True):
+                reset_quiz_preview()
+                st.rerun()
+        with setup_again_column:
+            if st.button("返回设置", use_container_width=True):
+                reset_quiz_preview()
+                st.rerun()
+
+    with guide_column:
+        st.markdown(
+            "<div class='focus-card'><strong>后续结果闭环</strong><span>判分时引用章节原文；错题进入会话内错题本，并支持 JSON 导出/导入。</span></div>",
+            unsafe_allow_html=True,
+        )
 
 
 def import_note(
@@ -384,6 +713,19 @@ st.markdown(
     }
     .focus-card ul { margin: .3rem 0 0; padding-left: 1.15rem; }
     .focus-card li { color: var(--muted); font-size: .84rem; line-height: 1.55; margin-bottom: .2rem; }
+    .quiz-note {
+        margin: .9rem 0; padding: .75rem .9rem; border-radius: 12px;
+        background: rgba(220,233,223,.48); color: #426550; font-size: .86rem; font-weight: 650;
+    }
+    .quiz-question {
+        margin: .85rem 0; padding: 1.25rem 1.3rem; border: 1px solid var(--line);
+        border-radius: 18px; background: rgba(255,253,249,.94); box-shadow: 0 12px 30px rgba(51,67,54,.07);
+    }
+    .quiz-question span {
+        display: inline-flex; padding: .2rem .52rem; margin-bottom: .65rem;
+        border-radius: 99px; background: var(--peach); color: #8b4f36; font-size: .74rem; font-weight: 750;
+    }
+    .quiz-question strong { display: block; color: var(--ink); font-size: 1.05rem; line-height: 1.65; }
     .mini-step {
         background: #fffdf9; border-left: 3px solid #8eb69a;
         padding: .72rem .8rem; margin: .65rem 0; border-radius: 0 10px 10px 0;
@@ -870,12 +1212,13 @@ if current_page == "关于":
     st.stop()
 
 has_api_key = has_valid_api_key()
+
 if not has_api_key:
     st.markdown(
-        "<div class='page-heading'><h1>智能问答</h1><p>围绕已导入的笔记进行检索与问答。</p></div>",
+        "<div class='page-heading'><h1>智能复习</h1><p>验证 API Key 后加载你的知识库。</p></div>",
         unsafe_allow_html=True,
     )
-    st.warning("请先在「设置」页填写并验证 DeepSeek API Key。")
+    st.warning("尚未验证 DeepSeek API Key。请先前往「设置」填写并验证，验证成功后才能查看笔记、智能问答和章节小测。")
     st.stop()
 
 notes = list_notes()
@@ -887,9 +1230,21 @@ note_count = len(notes)
 chunk_count = sum(note["chunk_count"] for note in notes)
 
 st.markdown(
-    f"<div class='page-heading'><h1>智能问答</h1><p>当前检索范围 · {note_count} 份笔记 · {chunk_count} 个片段</p></div>",
+    f"<div class='page-heading'><h1>智能复习</h1><p>当前知识库 · {note_count} 份笔记 · {chunk_count} 个片段</p></div>",
     unsafe_allow_html=True,
 )
+
+study_task = st.segmented_control(
+    "学习任务",
+    options=["智能问答", "章节小测"],
+    default="智能问答",
+    key="study_task",
+    label_visibility="collapsed",
+)
+
+if study_task == "章节小测":
+    render_quiz_preview(notes, has_api_key)
+    st.stop()
 
 chat_column, focus_column = st.columns([2.1, 1], gap="large")
 
@@ -902,7 +1257,7 @@ with chat_column:
         st.session_state.conversation_id = uuid4().hex
 
     st.markdown(
-        "<div class='mode-flow'>统一检索：查询改写 → 向量 + BM25 → RRF → Cross-Encoder → 基于笔记回答</div>",
+        "<div class='mode-flow'>系统自动路由：基础对话直接回答 · 笔记问题进入混合检索 · 章节小测生成结构化复习题</div>",
         unsafe_allow_html=True,
     )
 
@@ -915,6 +1270,16 @@ with chat_column:
                 <div class="empty-card">
                     <strong>先导入第一份 Markdown 笔记</strong>
                     <span>导入后可以询问概念、术语或跨章节问题；回答会附带对应的原文来源。</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        elif not st.session_state.messages:
+            st.markdown(
+                """
+                <div class="empty-card">
+                    <strong>直接告诉我你现在想怎么复习</strong>
+                    <span>例如“Git 是什么”会得到简短回答；“根据 Git 笔记帮我复习”会整理核心考点、易错点、记忆方法和模拟题；涉及个人资料时才进入 RAG 检索。</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -969,9 +1334,25 @@ with chat_column:
             question = chat_submission.text
             uploaded_chat_image = chat_submission.files[0] if chat_submission.files else None
 
-    if question:
+    if question or uploaded_chat_image:
+        question = question.strip() or "请根据这张图片涉及的主题，从我的笔记中检索相关内容并简要说明。"
+        basic_answer = None if uploaded_chat_image else get_basic_chat_response(question)
+        if basic_answer is not None:
+            st.session_state.messages.append({"role": "user", "content": question})
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": basic_answer,
+                    "sources": [],
+                    "image_query": False,
+                    "elapsed_ms": 0,
+                    "route": "basic_chat",
+                }
+            )
+            st.rerun()
+
         if not uploaded_chat_image and not notes:
-            st.warning("请先导入 Markdown 笔记，或在对话区上传一张图片。")
+            st.warning("知识问答需先导入相关笔记；图片只用于辅助检索。")
             st.stop()
         st.session_state.messages.append({"role": "user", "content": question})
 
@@ -1020,8 +1401,9 @@ with chat_column:
                                 state="running",
                             )
                             image_bytes = uploaded_chat_image.getvalue()
-                            mime = validate_image(image_bytes, uploaded_chat_image.type)
-                            compressed_image = _maybe_compress_image(image_bytes, mime)
+                            compressed_image, mime = prepare_image_for_model(
+                                image_bytes, uploaded_chat_image.type
+                            )
                             description = asyncio.run(describe_image_url(
                                 image_data_url(compressed_image, mime),
                                 st.session_state.deepseek_api_key,
@@ -1107,11 +1489,11 @@ with chat_column:
                 st.rerun()
 
 with focus_column:
-    mode_now = "统一混合检索"
-    mode_icon = "🎯"
-    mode_chain = "查询改写 → 向量 Top-6 + BM25 Top-6 → RRF 融合 → Cross-Encoder 精排 Top-3 → 回答"
-    mode_scenarios = ["日常复习与术语查找", "需要稳定召回和可追溯来源"]
-    mode_features = ["用户无需选择模式", "云端无精排模型时自动降级为 RRF Top-3"]
+    mode_now = "混合路由 · 已接入"
+    mode_icon = "🧭"
+    mode_chain = "基础对话直接回复 → 知识问题进入混合检索 → 章节复习进入小测工具"
+    mode_scenarios = ["问候与使用说明：直接回复", "笔记问题：混合检索后回答", "章节小测：出题、作答、评分与复盘"]
+    mode_features = ["基础对话不调用模型、不检索笔记", "知识问题仍只依据笔记回答并展示来源"]
     st.markdown(
         f"""
         <div class='focus-card'>

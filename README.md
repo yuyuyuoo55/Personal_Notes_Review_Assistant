@@ -2,13 +2,13 @@
 
 # 个人笔记复习助手
 
-**把 Markdown 和图片笔记变成一个可检索、可追溯、会拒答的个人知识库。**
+**把 Markdown 和图片笔记变成可问答、可小测、可追溯的个人复习空间。**
 
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![在线体验](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)
-[![Tests](https://img.shields.io/badge/tests-30%20passed-4f7a63)](#测试与验证)
+[![Tests](https://img.shields.io/badge/tests-64%20passed-4f7a63)](#测试与验证)
 [![License](https://img.shields.io/badge/license-MIT-d0a64a)](LICENSE)
 
 上传 Markdown、图文 ZIP 或单张图片，用自然语言复习自己的资料。回答会附带来源文件、章节和原文片段；检索不到可靠依据时明确拒答。
@@ -26,29 +26,30 @@
 ## 项目亮点
 
 - **回答可追溯**：答案附带来源文件、标题路径和原文片段，不只返回模型文本。
-- **统一检索链路**：系统固定执行查询改写、混合召回、融合与精排，用户无需选择模式。
+- **自动路由**：问候、身份和使用说明由规则直接回复；知识问题进入查询改写、混合召回、融合与精排，用户无需选择技术模式。
 - **面向中文笔记**：BM25 使用 `pkuseg` 分词，并与向量检索进行 RRF 排名融合。
 - **资料不足拒答**：检索结果不可靠时提示补充笔记，不使用联网知识强行回答。
 - **本地数据持久化**：原始 Markdown、导入图片、Chroma 向量索引和 BM25 索引均保存在本机。
 - **流式交互**：FastAPI 通过 SSE 返回检索阶段、来源、回答 token 和耗时。
 - **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
 - **余额查询**：Key 验证通过后，每次进入设置页会自动查询并显示当前 DeepSeek 总余额。
-- **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片也会先转成描述，再参与当前 RAG 模式。
+- **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片先转成描述并仅用于辅助检索，不直接作为回答依据。
+- **章节小测**：从 Markdown 整篇或具体章节固定生成 2 道单选题和 1 道简答题；选择题由代码判分，简答题依据原文评分并生成核心考点、易错点和记忆方法。
 - **知识库数据看板**：展示笔记总数、片段总数、各笔记片段分布和文档类型占比，并使用多色编码区分数据。
 
-当前支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。章节小测、通用批量导入、笔记更新和多用户能力尚未实现。
+当前支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。通用批量导入、笔记更新和多用户能力尚未实现。
 
-## 统一检索设计
+## 自动路由与统一检索设计
 
-当前所有问题统一执行：查询改写 → 向量 Top-6 + BM25 Top-6 → RRF → Cross-Encoder → Top-3 → 基于笔记生成。聊天图片的描述只会扩充检索查询，不作为最终回答依据。旧客户端传入 `fast` 或 `accurate` 时仍可兼容，但实际执行链路相同。
+基础问候、身份和使用说明由本地规则直接回复，不调用模型也不检索。其余知识问题执行：查询改写 → 向量 Top-6 + BM25 Top-6 → RRF → Cross-Encoder → Top-3 → 基于笔记生成。聊天图片的描述只扩充检索查询，不作为最终回答依据；图片查询的候选还必须通过向量相关性门控。旧客户端传入 `fast` 或 `accurate` 时仍可兼容，但实际执行同一知识检索链路。
 
-项目早期曾提供快速和精确两种模式，并用固定题集做过对比。后来考虑到用户难以判断该选哪一种，而复习场景更需要稳定、可追溯的结果，因此取消前端模式选择并统一为固定工作流；历史评测数据仍保留为这次产品决策的依据。
+项目早期曾提供快速和精确两种模式，并用固定题集做过对比。后来考虑到用户难以判断该选哪一种，而复习场景更需要专注任务本身，因此取消前端模式选择，改为由系统自动路由：基础对话本地回复，知识问题进入统一 RAG 工作流，复习任务进入章节小测。历史评测数据仍保留为这次产品决策的依据。
 
 ## 页面功能
 
 | 页面 | 主要功能 |
 | --- | --- |
-| 智能问答 | 统一混合检索、文本或图片辅助提问、流式回答、来源追溯和耗时展示 |
+| 智能复习 | 智能问答与章节小测同页切换；支持图片辅助检索、流式回答、来源追溯、作答评分和复盘 |
 | 知识库 | 导入 Markdown、图文 ZIP 或单张图片，查看文件类型、导入时间和片段数，支持删除与清空 |
 | 数据看板 | 查看笔记规模、片段分布和文档类型占比 |
 | 设置 | 在当前会话内验证或清除 DeepSeek Key，并自动显示当前总余额 |
@@ -80,16 +81,19 @@ DASHSCOPE_API_KEY=YOUR_API_KEY_HERE
 
 ```mermaid
 flowchart LR
-    U[用户] --> UI[Streamlit 前端]
-    UI --> API[FastAPI + SSE]
+    U[用户] --> UI[Streamlit 界面]
+    UI --> ROUTER{任务路由}
+    ROUTER -->|问候/使用说明| BASIC[本地直接回复]
+    ROUTER -->|笔记问题| RAG[统一 RAG 工作流]
+    ROUTER -->|复习任务| QUIZ[章节小测]
 
-    API --> INGEST[Markdown / 独立图片导入]
+    UI --> INGEST[Markdown / 独立图片导入]
     INGEST --> FILES[(本地原文)]
     INGEST --> EMB[DashScope Embedding]
     EMB --> CHROMA[(Chroma)]
 
-    API --> QUESTION[用户问题]
-    API -->|聊天图片| VISION[DeepSeek Vision 生成描述]
+    RAG --> QUESTION[用户问题]
+    RAG -->|聊天图片| VISION[DeepSeek Vision 生成描述]
     VISION --> HINT[图片描述辅助检索]
     HINT --> REWRITE[查询改写]
     QUESTION --> REWRITE
@@ -99,9 +103,11 @@ flowchart LR
     BM25 --> RRF
     RRF --> RERANK[Cross-Encoder 精排 Top-3]
 
-    RERANK --> LLM
-    VISION --> API
-    LLM --> API
+    RERANK --> LLM[DeepSeek 基于笔记生成]
+    QUIZ --> EVIDENCE[章节原文编号与依据校验]
+    EVIDENCE --> QGEN[2 道单选 + 1 道简答]
+    QGEN --> SCORE[代码判选择题 + 模型判简答题]
+    SCORE --> REVIEW[考点 / 易错点 / 记忆方法]
 ```
 
 ### 笔记导入流程
@@ -128,13 +134,15 @@ flowchart LR
 | API 入口 | `backend/app/main.py` | 注册健康检查、笔记、问答、Key 与余额路由 |
 | 笔记导入 | `backend/app/api/notes.py` | 上传校验、保存、切分、向量化与失败回滚 |
 | 统一检索编排 | `backend/app/services/rag_service.py` | 查询改写、阈值判断、混合检索、精排与生成 |
+| 章节小测 | `backend/app/services/quiz_service.py` | 章节上下文、2 单选 + 1 简答生成、依据校验、评分与复盘 |
 | 历史 Agent 实现 | `backend/app/services/agent_service.py` | 保留早期快速模式实现，当前问答链路不再调用 |
 | Markdown 切分 | `backend/app/services/note_splitter.py` | 标题感知切分和稳定 `chunk_id` |
 | 混合检索 | `bm25_retriever.py` / `rrf_fusion.py` | 中文关键词召回与排名融合 |
 | 精排 | `backend/app/services/reranker.py` | `BAAI/bge-reranker-base` Cross-Encoder 精排 |
 | 向量存储 | `backend/app/storage/vector_store.py` | DashScope Embedding 和 Chroma 持久化 |
 | Key 与余额 | `backend/app/api/key_validate.py` | 请求级 Key 验证和 DeepSeek 当前余额查询 |
-| 前端 | `streamlit_demo.py` | 顶部多页导航、导入、问答、来源卡片、余额和数据看板 |
+| 前端 | `streamlit_demo.py` | 单体部署入口；负责导航、自动路由、问答、小测、来源卡片、余额和数据看板 |
+| 分离式前端 | `frontend/app.py` | 本地双进程部署时通过 FastAPI + SSE 完成问答 |
 | 回归评测 | `eval_rag.py` | 统一链路的 31 题检索、拒答、延迟与 Markdown 报告生成 |
 
 ## 回归评测
@@ -258,9 +266,10 @@ uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 
 2. 进入“知识库”，上传一份非空 `.md` 笔记、一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片，或一个包含一份 Markdown 与配套图片的 `.zip`。
 3. 文档包含本地图片时，建议将图片放入 Markdown 同级的 `images/` 目录，并保持 `![说明](images/文件名.png)` 相对路径后整体压缩为 ZIP。
 4. 点击“导入文件”，等待图片描述、切分与向量化完成。旧文档中的本地绝对路径会在 ZIP 内按唯一文件名尝试匹配。
-5. 返回“智能问答”，直接输入问题查看回答与来源，系统会自动执行统一检索。
+5. 返回“智能复习”，在“智能问答”中直接输入问题查看回答与来源；基础说明直接回复，知识问题自动进入统一检索。
 6. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会用图片描述辅助检索，最终回答只依据命中的笔记资料。没有可靠笔记时会明确提示资料不足。
-7. 进入“数据看板”，查看笔记总数、片段分布和资料类型占比。
+7. 切换到“章节小测”，选择笔记与章节，生成 2 道单选题和 1 道简答题；提交后查看总分、逐题反馈、参考答案和原文依据。
+8. 进入“数据看板”，查看笔记总数、片段分布和资料类型占比。
 
 用户 Key 只保存在当前 Streamlit `session_state`，并通过 `X-DeepSeek-API-Key` 请求头传给后端；不会写入数据库、配置文件或日志。
 
@@ -272,7 +281,7 @@ uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 
 uv run pytest -q
 ```
 
-当前版本本机回归结果为 `38 passed`。测试覆盖健康检查、缺 Key、Key 验证、余额查询、图片辅助检索、图片与笔记命中/未命中、纯文本兼容、错误降级、Markdown 图文 ZIP、笔记删除、本地图片块、独立图片清单恢复、模型实例隔离和 Key 不落日志；所有外部 API 均使用 Mock，不产生费用。
+当前版本本机回归结果为 `64 passed`。测试覆盖健康检查、缺 Key、Key 验证、余额查询、图片辅助检索、错图过滤、历史索引隔离、大图压缩、章节小测生成与评分、常见模型字段兼容、题干标点修正、图片与笔记命中/未命中、纯文本兼容、错误降级、Markdown 图文 ZIP、笔记删除、本地图片块、独立图片清单恢复、模型实例隔离和 Key 不落日志；自动化测试中的外部 API 均使用 Mock，不产生费用。
 
 多模态回归用例位于 `tests/test_multimodal.py`：验证图片描述只进入检索查询、不进入最终回答资料，同时检查无笔记命中时拒答、纯文本兼容、本地图片块及来源 metadata。
 
@@ -338,7 +347,7 @@ X-DeepSeek-API-Key: YOUR_API_KEY_HERE
 - Cross-Encoder 首次加载较慢，且当前没有最低精排分阈值。
 - 自动评测依赖特定测试笔记，固定分数不能直接迁移到其他知识库。
 - 当前没有用户系统、权限隔离、云端同步或生产部署配置。
-- 章节小测仍是界面中的下一阶段规划，不属于已实现能力。
+- 章节小测当前固定为 3 题并使用会话缓存；尚未实现跨设备错题同步和长期学习记录。
 
 ## 安全说明
 

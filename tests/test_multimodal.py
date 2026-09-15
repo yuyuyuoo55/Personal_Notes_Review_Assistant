@@ -20,6 +20,7 @@ from backend.app.services.image_chunk_store import (
 from backend.app.services.multimodal_service import ImageProcessingError, InvalidApiKeyError
 from backend.app.services.multimodal_service import _raise_for_vision_response
 from backend.app.services.multimodal_service import _maybe_compress_image
+from backend.app.services.multimodal_service import prepare_image_for_model
 from backend.app.services.rag_service import create_chat_model
 from backend.app.services.chat_service import generate_responses_based_on_the_data
 
@@ -41,6 +42,9 @@ def test_chat_and_import_require_user_api_key():
         files={"file": ("note.md", b"# test", "text/markdown")},
     )
     assert import_response.status_code == 401
+
+    notes_response = client.get("/api/notes")
+    assert notes_response.status_code == 401
 
 
 def test_image_question_description_only_assists_retrieval(monkeypatch, caplog):
@@ -159,6 +163,60 @@ def test_legacy_modes_share_the_unified_retrieval_path(monkeypatch):
     assert seen_queries == ["什么是 RRF？", "什么是 RRF？"]
 
 
+def test_vector_results_exclude_stale_chunks_not_in_current_library(monkeypatch):
+    current = Document(
+        page_content="Git 是分布式版本控制工具。",
+        metadata={"source": "Git.md", "chunk_id": "current-git"},
+    )
+    stale = Document(
+        page_content="搭建个人笔记复习助手的开发计划。",
+        metadata={"source": "task_plan.md", "chunk_id": "stale-plan"},
+    )
+    captured_result_lists = []
+
+    class FakeChatModel:
+        def stream(self, _prompt):
+            yield SimpleNamespace(content="Git 回答")
+
+    monkeypatch.setattr(rag_service, "load_all_chunks", lambda: (current,))
+    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: FakeChatModel())
+    monkeypatch.setattr(rag_service, "query_rewrite", lambda query, model: query)
+    monkeypatch.setattr(
+        rag_service,
+        "vector_retriever",
+        lambda **kwargs: [(stale, 0.1), (current, 0.7)],
+    )
+    monkeypatch.setattr(
+        rag_service,
+        "bm25_retriever",
+        lambda **kwargs: [
+            ({"id": "current-git", "content": current.page_content, "metadata": current.metadata}, 2.0)
+        ],
+    )
+
+    def fake_fusion(result_lists):
+        captured_result_lists.append(result_lists)
+        assert [doc.metadata["chunk_id"] for doc, _score in result_lists[0]] == ["current-git"]
+        return [{"id": "current-git", "content": current.page_content, "metadata": current.metadata}]
+
+    monkeypatch.setattr(rag_service, "rrf_fusion", fake_fusion)
+    monkeypatch.setattr(rag_service, "get_reranker_model", lambda: None)
+    monkeypatch.setattr(
+        rag_service,
+        "cross_encoder_reranker_index",
+        lambda **kwargs: kwargs["rrf_results"],
+    )
+
+    preparation = rag_service.prepare_rag_answer(
+        original_query="Git 是什么？",
+        api_key=TEST_KEY,
+    )
+
+    assert captured_result_lists
+    assert [source.file_name for source in preparation.sources] == ["Git.md"]
+    assert all(source.file_name != "task_plan.md" for source in preparation.sources)
+
+
 def test_plain_accurate_prompt_does_not_include_image_only_rules():
     captured_prompts = []
 
@@ -231,6 +289,58 @@ def test_image_description_assists_retrieval_but_is_not_answer_material(monkeypa
     assert "会议安排需要提前十分钟签到" in captured_prompts[0]
 
 
+def test_image_retrieval_filters_bm25_only_wrong_image(monkeypatch):
+    correct_note = Document(
+        page_content="Vue 生命周期包含 mounted 等钩子。",
+        metadata={"source": "Vue.md", "chunk_id": "vue-text"},
+    )
+    wrong_image = Document(
+        page_content="线程的生命周期包含新建、运行和终止。",
+        metadata={
+            "source": "线程的生命周期.png",
+            "chunk_id": "thread-image",
+            "is_image_chunk": True,
+            "image_path": "thread.png",
+        },
+    )
+    reranked = [
+        {"id": "thread-image", "content": wrong_image.page_content, "metadata": wrong_image.metadata},
+        {"id": "vue-text", "content": correct_note.page_content, "metadata": correct_note.metadata},
+    ]
+
+    class FakeChatModel:
+        def stream(self, _prompt):
+            yield SimpleNamespace(content="根据 Vue 笔记回答")
+
+    monkeypatch.setattr(rag_service, "load_all_chunks", lambda: (correct_note, wrong_image))
+    monkeypatch.setattr(rag_service, "create_chat_model", lambda api_key: FakeChatModel())
+    monkeypatch.setattr(rag_service, "query_rewrite", lambda query, model: query)
+    monkeypatch.setattr(
+        rag_service,
+        "vector_retriever",
+        lambda **kwargs: [(correct_note, 0.8), (wrong_image, 1.45)],
+    )
+    monkeypatch.setattr(
+        rag_service,
+        "bm25_retriever",
+        lambda **kwargs: [
+            ({"id": "thread-image", "content": wrong_image.page_content, "metadata": wrong_image.metadata}, 8.0),
+        ],
+    )
+    monkeypatch.setattr(rag_service, "rrf_fusion", lambda _results: reranked)
+    monkeypatch.setattr(rag_service, "get_reranker_model", lambda: None)
+    monkeypatch.setattr(rag_service, "cross_encoder_reranker_index", lambda **kwargs: reranked)
+
+    preparation = rag_service.prepare_rag_answer(
+        original_query="这张图讲的是什么？",
+        api_key=TEST_KEY,
+        retrieval_hint="图片内容：Vue 生命周期 mounted",
+    )
+
+    assert [source.file_name for source in preparation.sources] == ["Vue.md"]
+    assert "根据 Vue 笔记回答" in "".join(event.content for event in preparation.answer_stream)
+
+
 def test_blurry_image_without_notes_is_not_used_as_answer_material(monkeypatch):
     monkeypatch.setattr(rag_service, "load_all_chunks", lambda: ())
 
@@ -289,6 +399,54 @@ def test_large_image_is_resized_before_vision():
     with Image.open(io.BytesIO(compressed)) as result:
         assert max(result.size) <= 1600
         assert result.format == "PNG"
+
+
+def test_raw_image_over_model_limit_can_be_compressed_before_final_validation(monkeypatch):
+    original = b"\x89PNG\r\n\x1a\n" + b"x" * (9 * 1024 * 1024)
+    compressed = b"\x89PNG\r\n\x1a\nsmall"
+    monkeypatch.setattr(multimodal_service, "_maybe_compress_image", lambda *_args: compressed)
+
+    prepared, mime = prepare_image_for_model(original, "image/png")
+
+    assert prepared == compressed
+    assert mime == "image/png"
+
+
+def test_image_endpoint_accepts_image_without_text(monkeypatch):
+    async def fake_describe(_image_url, _api_key):
+        return "Vue 生命周期"
+
+    def fake_prepare(**kwargs):
+        assert kwargs["original_query"].startswith("请根据这张图片涉及的主题")
+        return SimpleNamespace(
+            rewritten_query=kwargs["original_query"],
+            sources=[],
+            answer_stream=iter([SimpleNamespace(event="token", content="笔记中无相关记录", sources=[])]),
+        )
+
+    monkeypatch.setattr("backend.app.api.chat.describe_image_url", fake_describe)
+    monkeypatch.setattr("backend.app.api.chat.prepare_rag_answer", fake_prepare)
+    response = client.post(
+        "/api/chat/image",
+        headers={"X-DeepSeek-API-Key": TEST_KEY},
+        files={"image": ("vue.png", b"\x89PNG\r\n\x1a\nmock", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert "笔记中无相关记录" in response.text
+
+
+def test_notes_list_requires_key_and_does_not_expose_source(monkeypatch, tmp_path):
+    note_path = tmp_path / "safe.md"
+    note_path.write_text("# safe", encoding="utf-8")
+    monkeypatch.setattr(notes_api, "UPLOAD_DIRECTORY", tmp_path)
+    monkeypatch.setattr(notes_api.vector_store, "get", lambda **_kwargs: {"ids": ["chunk-1"]})
+
+    response = client.get("/api/notes", headers={"X-DeepSeek-API-Key": TEST_KEY})
+
+    assert response.status_code == 200
+    assert response.json()[0]["file_name"] == "safe.md"
+    assert "source" not in response.json()[0]
 
 
 def test_image_compression_falls_back_when_pillow_is_unavailable(monkeypatch):

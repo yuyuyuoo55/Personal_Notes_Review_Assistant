@@ -212,7 +212,6 @@ st.markdown(
 )
 
 
-@st.cache_data(ttl=30, show_spinner=False)
 def get_notes() -> tuple[list[dict], str | None]:
     """从 FastAPI 获取已导入的笔记；短暂重试，避免后端刚启动时误判为空库。"""
     last_error = ""
@@ -220,7 +219,10 @@ def get_notes() -> tuple[list[dict], str | None]:
         try:
             # 本项目的前后端都在本机。关闭环境代理读取，避免 127.0.0.1 被错误转发。
             with httpx.Client(timeout=15, trust_env=False) as client:
-                response = client.get(f"{API_BASE_URL}/api/notes")
+                response = client.get(
+                    f"{API_BASE_URL}/api/notes",
+                    headers={DEEPSEEK_API_KEY_HEADER: st.session_state.deepseek_api_key},
+                )
                 response.raise_for_status()
                 return response.json(), None
         except (httpx.HTTPError, ValueError) as error:

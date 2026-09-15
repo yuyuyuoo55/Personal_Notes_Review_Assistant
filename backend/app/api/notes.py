@@ -191,7 +191,9 @@ async def import_note(
 
 
 @router.get("", response_model=list[NoteSummary])
-def list_notes() -> list[NoteSummary]:
+def list_notes(
+    _api_key: str = Depends(require_user_deepseek_api_key),
+) -> list[NoteSummary]:
     """返回已上传笔记及其已写入 Chroma 的 Chunk 数量。"""
     # 1. 首次启动还没有上传目录时，返回空列表。
     if not UPLOAD_DIRECTORY.exists():
@@ -210,7 +212,6 @@ def list_notes() -> list[NoteSummary]:
                 file_name=file_path.name,
                 chunk_count=len(stored_chunks["ids"]),
                 kind="md",
-                source=str(file_path),
                 imported_at=datetime.fromtimestamp(file_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
             )
         )
@@ -230,7 +231,6 @@ def list_notes() -> list[NoteSummary]:
                 chunk_count=1,
                 kind="image",
                 doc_id=doc_id,
-                source=str(source),
                 imported_at=datetime.fromtimestamp(image_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
             )
         )

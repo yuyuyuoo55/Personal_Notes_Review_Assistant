@@ -1,8 +1,9 @@
-"""RAG 业务编排：所有问题统一执行可追溯的混合检索链路。"""
+"""RAG 业务编排：知识问题执行可追溯的混合检索链路。"""
 
 from collections.abc import Generator
 from dataclasses import dataclass
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal
 
@@ -75,11 +76,27 @@ def no_material_preparation(original_query: str) -> RagPreparation:
     )
 
 
-def create_chat_model(api_key: str) -> ChatDeepSeek:
+def create_chat_model(
+    api_key: str,
+    *,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    json_mode: bool = False,
+    disable_thinking: bool = False,
+) -> ChatDeepSeek:
     """按请求创建模型，避免把任一用户 Key 留在跨请求缓存中。"""
     if not api_key:
         raise RuntimeError("请先输入API Key")
-    return ChatDeepSeek(model=DEEPSEEK_TEXT_MODEL, api_key=api_key)
+    model_options = {"model": DEEPSEEK_TEXT_MODEL, "api_key": api_key}
+    if temperature is not None:
+        model_options["temperature"] = temperature
+    if max_tokens is not None:
+        model_options["max_tokens"] = max_tokens
+    if json_mode:
+        model_options["model_kwargs"] = {"response_format": {"type": "json_object"}}
+    if disable_thinking:
+        model_options["extra_body"] = {"thinking": {"type": "disabled"}}
+    return ChatDeepSeek(**model_options)
 
 
 @lru_cache
@@ -167,6 +184,15 @@ def build_source_chunks(reranked_results: list[dict]) -> list[SourceChunk]:
     return sources
 
 
+def _chunk_id(document: Document) -> str:
+    """与 RRF 一致地读取或生成稳定片段 ID。"""
+    chunk_id = document.metadata.get("chunk_id")
+    if chunk_id:
+        return str(chunk_id)
+    source = str(document.metadata.get("source", "unknown"))
+    return sha256(f"{source}:{document.page_content}".encode("utf-8")).hexdigest()[:16]
+
+
 def prepare_rag_answer(
     original_query: str,
     mode: str = UNIFIED_MODE,
@@ -201,6 +227,14 @@ def prepare_rag_answer(
         vector_store=vector_store,
         top_k=6,
     )
+    # Chroma 是持久化存储，历史开发文件可能仍残留在索引中。
+    # 只有当前上传目录/图片清单仍存在的 chunk 才允许参与本次回答。
+    active_chunk_ids = {_chunk_id(document) for document in all_chunks}
+    vector_results = [
+        (document, distance)
+        for document, distance in vector_results
+        if _chunk_id(document) in active_chunk_ids
+    ]
     bm25_results = bm25_retriever(
         query=rewritten_query,
         chunks_list=all_chunks,
@@ -209,13 +243,13 @@ def prepare_rag_answer(
     )
     _bm25_rebuild_required = False
 
-    # 4. 向量很远且 BM25 无命中时，认为没有可靠资料。
-    best_vector_distance = vector_results[0][1] if vector_results else None
-    has_keyword_hit = any(score > 0 for _, score in bm25_results)
-    has_relevant_material = (
-        best_vector_distance is not None and best_vector_distance <= MAX_VECTOR_DISTANCE
-    ) or has_keyword_hit
-    if not has_relevant_material:
+    # 4. BM25 的弱词重合不能单独证明相关；至少要有一个合格的向量语义命中。
+    qualified_vector_ids = {
+        _chunk_id(document)
+        for document, distance in vector_results
+        if distance <= MAX_VECTOR_DISTANCE
+    }
+    if not qualified_vector_ids:
         return no_material_preparation(original_query)
 
     # 5. RRF 按排名融合两路结果，随后 Cross-Encoder 精排 Top-3。
@@ -226,6 +260,15 @@ def prepare_rag_answer(
         cross_encoder=get_reranker_model(),
         top_k=3,
     )
+
+    # 图片描述只辅助检索。图片查询的最终来源必须同时通过向量阈值，
+    # 防止“生命周期”等弱关键词把另一张库内图带进答案。
+    if retrieval_hint:
+        reranked_results = [
+            result for result in reranked_results if str(result.get("id")) in qualified_vector_ids
+        ]
+        if not reranked_results:
+            return no_material_preparation(original_query)
 
     # 6. 只将最终片段交给生成模块，不回到 Agent。
     return RagPreparation(

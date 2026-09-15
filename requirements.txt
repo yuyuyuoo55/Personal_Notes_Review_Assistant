@@ -1,9 +1,9 @@
 # 个人笔记复习助手 · 云端部署依赖（Streamlit Community Cloud / Hugging Face Spaces）
 # 说明：
-#   - 以「快速模式（Agent 检索）」为线上主力，保证安装快、冷启动稳定；
-#   - pkuseg 与 sentence-transformers/torch 已从代码改为可选：缺省时精确模式自动
+#   - 当前只有一个自动路由入口：基础对话本地回复，知识问题进入统一 RAG 链路；
+#   - pkuseg 与 sentence-transformers/torch 已改为可选：缺省时统一检索链路自动
 #     降级为「查询改写 + 向量/BM25 双路召回 + RRF 融合（无精排）」，不阻塞运行。
-#     如需完整精确模式（含精排），可自行加回下面两行（较大、冷启动慢）：
+#     如需启用完整 Cross-Encoder 精排，可自行加回下面两行（较大、冷启动慢）：
 #         sentence-transformers>=5.2,<6
 #         torch>=2.9,<3
 
