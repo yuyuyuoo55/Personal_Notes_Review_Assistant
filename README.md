@@ -19,7 +19,21 @@
 
 </div>
 
-![项目主界面](docs/images/project-overview.png)
+![项目定位](docs/images/social-preview.png)
+
+## 界面预览
+
+### 章节小测
+
+从真实 Markdown 笔记或章节生成 2 道单选题和 1 道简答题。
+
+![章节小测](docs/images/project-overview.png)
+
+### 智能问答与自动路由
+
+基础对话直接回复，笔记知识问题进入统一混合检索，并展示当前处理链路。
+
+![智能问答与自动路由](docs/images/intelligent-chat.png)
 
 > 这是一个可本地运行的个人学习型 MVP，不是企业级知识库平台。用户 DeepSeek Key 仅在当前会话和单次请求中使用；笔记、索引和日志默认保存在本机且不提交 Git。
 
