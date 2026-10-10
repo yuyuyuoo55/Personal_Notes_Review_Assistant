@@ -2,6 +2,8 @@
 
 本目录提供云端演示入口，复用正式 V2 Graph、FastAPI HTTP/SSE 与 Streamlit 页面；不涉及 V1 入口，也不开放开发者本机 API。
 
+**在线地址：[打开 V2 演示](https://personal-notes-review-v2.streamlit.app/)**。2026-10-10 已验证实际 Cloud 构建、首页“云端会话已连接”、设置页和独立未登录浏览器访问；真实供应商 Key 未配置，尚未进行真实 AI 全链路验收。
+
 ## Cloud 部署配置
 
 - Repository：`yuyuyuoo55/Personal_Notes_Review_Assistant`
@@ -46,7 +48,7 @@ flowchart LR
 - Cloud 检查：未知 token、跨会话密钥/同名文件/笔记/小测隔离、禁用环境 Key 回退、Tavily 显式 Key、设置删除、过期清理、限流、上传限制、done/error，以及真实内部 HTTP 的首个 Token 在 Fake 模型完成前抵达。
 - 原正式前端 30 项 Fake/Mock 浏览器联调全部通过，无浏览器异常。
 - Streamlit AppTest：入口加载无异常，Cloud health 已连接；未填 Key、未调用模型。
-- Linux Python 3.12 依赖解析成功（163 包），不等于 Linux 实际安装或模型内存验证；本机没有可用 Linux 环境，安装以 Cloud 构建日志为准。
+- Cloud 实际 Linux Python 3.12.15 构建成功：uv 解析 164 包，安装所需依赖；平台日志显示依赖处理完成并更新应用。首页和设置页连接正常，独立未登录浏览器可访问；这不等于模型加载、内存峰值或真实业务质量已通过。
 - 真实供应商调用：0。真实模型分类、检索质量、视觉、小测质量与 Cloud 精排内存仍需另行有限额度验收。
 
 本机验证可运行：

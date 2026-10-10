@@ -4,7 +4,9 @@
 
 当前主版本是 **V2：LangGraph RAG Workflow + FastAPI + Streamlit**。导入 Markdown、图片或图文 ZIP 后，既能围绕原文提问，也能通过小测发现错误并生成复习建议。工作流由代码确定；Router 分类问题，不是模型自主选择工具的 Agent。
 
-**发布状态：源码已发布，本机运行；V2 Streamlit Cloud 部署验证中。** [V2 详细说明](v2/README.md) · [发布验证](v2/RELEASE_VALIDATION.md) · [在线部署评估](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md) · [V1 历史文档](docs/history/V1_README.md)
+**发布状态：V2 已部署至 Streamlit Cloud。** [打开 V2 演示](https://personal-notes-review-v2.streamlit.app/) · [V2 详细说明](v2/README.md) · [发布验证](v2/RELEASE_VALIDATION.md) · [在线部署评估](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md) · [V1 历史文档](docs/history/V1_README.md)
+
+访客无需登录即可打开页面；AI 交互需在设置页配置自己的 DeepSeek / 百炼 Key，联网另需 Tavily Key。云端资料临时保存。已验证云端构建、首页连接与设置页，尚未进行真实模型全链路验收。
 
 ## 从资料到复习的产品闭环
 
@@ -134,7 +136,7 @@ Markdown 使用标题结构和 800/100 长度切分；稳定 Chunk ID 支持同�
 | 联网 | Tavily 官方远程 MCP `tavily_search` | 复用 MCP 接入，在明确开关下补充网页 |
 | 小测 | 结构化输出、原文 quote 核对、批改缓存 | 限制无依据题目，失败可重试；仍需真实模型质量评估 |
 
-V2 与 V1 业务独立，便于保留历史演进和评测。当前选择本机单用户、单 worker，资料落地 Chroma，小测与报告在进程内保存；没有加入生产鉴权、多租户或任务队列。公网演示需要补充费用限制和访客访问边界，详见部署评估。
+V2 与 V1 业务独立，便于保留历史演进和评测。本机入口采用单用户、单 worker，资料落地 Chroma，小测与报告在进程内保存。Cloud 专用入口复用同一业务，通过随机会话 token、独立集合和内存凭据隔离访客，并限制会话数、请求频率和并发；这是临时演示，不承诺生产多租户或持久化。详见 [Cloud 部署说明](v2/deploy/README.md)。
 
 ## 测试与真实验收边界
 
@@ -146,7 +148,9 @@ V2 与 V1 业务独立，便于保留历史演进和评测。当前选择本机�
 | 浏览器联调 | 30 项通过，Fake Model / Mock HTTP / 临时 Chroma | 实际前后端页面及协议联通 |
 | Graph 场景脚本 | offline、acceptance、web-switch、note-import 均退出 0 | 指定场景路径通过 |
 
-本次发布验证真实付费 API 请求为 0。Fake/Mock 不代表真实 Router 分类、答案准确率、网页时效、视觉识别或学习效果。使用已有 Python 3.12 环境，尚未验收全新环境完整安装。详细记录与离线命令见 [发布验证](v2/RELEASE_VALIDATION.md) 和 [V2 README](v2/README.md#离线回归)。原 V1 的历史评测留在独立文档，不作为 V2 指标。
+Cloud 适配后的最新离线回归：**167 项，165 通过、2 Windows 权限跳过，无失败**；新增 15 项会话隔离、限流、清理与 HTTP/SSE 检查。原 30 项 Fake/Mock 浏览器联调通过。Streamlit Cloud Python 3.12 实际依赖安装成功，独立未登录浏览器可打开首页，设置页显示未配置凭据。
+
+本次真实付费 API 请求为 0。Fake/Mock 不代表真实 Router 分类、答案准确率、网页时效、视觉识别或学习效果；Cloud 启动成功也不等于精排模型内存或真实 AI 全链路已验收。详细记录与离线命令见 [发布验证](v2/RELEASE_VALIDATION.md)、[Cloud 部署说明](v2/deploy/README.md) 和 [V2 README](v2/README.md#离线回归)。原 V1 的历史评测留在独立文档，不作为 V2 指标。
 
 ## 本地启动
 
@@ -171,7 +175,7 @@ Cloud 专用入口及会话隔离说明见 [Streamlit 部署说明](v2/deploy/RE
 
 ## 在线 Demo 与版本入口
 
-- **V2：尚未部署公网。** 当前可阅读源码、截图并本机运行；[只读部署方案报告](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md)比较完整容器、前后端分开部署与展示站点。
+- **V2 在线演示：** [personal-notes-review-v2.streamlit.app](https://personal-notes-review-v2.streamlit.app/)。无需登录浏览页面，真实 AI 交互使用访客自己的 Key；闲置 30 分钟后清理，休眠或重启可能清空资料。配置与限制见 [Cloud 部署说明](v2/deploy/README.md)。[原只读部署方案报告](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md)保留方案比较。
 - **V1 历史 Demo：** [Streamlit Cloud 地址](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)。本次未验证恢复状态，不能保证当前可用；它不代表 V2 功能。
 - [V1 原 README 与历史评测说明](docs/history/V1_README.md)；保留 `backend/`、`streamlit_demo.py` 及原评测文件。
 
@@ -187,8 +191,8 @@ Cloud 专用入口及会话隔离说明见 [Streamlit 部署说明](v2/deploy/RE
 | [api/main.py](v2/app/api/main.py) | FastAPI 入口 |
 | [frontend/app.py](v2/frontend/app.py) | Streamlit 入口 |
 
-当前限制：会话共享本地知识库和供应商配置；小测、报告重启丢失；没有公网鉴权、用户隔离和持久任务；Linux 环境 Key 可支持业务，但 Windows 凭据设置页不能原样搬过去。资源占用、真实模型质量和完整图文批量识别仍需测量与验收。
+当前限制：本机入口共享本地知识库与供应商配置；Cloud 专用入口按临时浏览器会话隔离，不能代替用户账户、永久存储或生产鉴权。小测、报告重启丢失；Cloud 采用 CPU 精排，首次模型下载和内存峰值尚未验收。Cloud 的 spaCy pkuseg fork 默认分词模型与本机不同，检索质量尚未对比。真实模型质量和完整图文批量识别仍需测量与验收。
 
-后续方向：先完成受限演示模式和部署验证，再考虑用户隔离、数据持久化、小测覆盖率与真实评测。以上是待做方向，不是已实现功能。
+后续方向：有限额度真实全链路与资源验收，再考虑账户体系、数据持久化、小测覆盖率与真实评测。以上是待做方向，不是已实现功能。
 
 [MIT License](LICENSE)
