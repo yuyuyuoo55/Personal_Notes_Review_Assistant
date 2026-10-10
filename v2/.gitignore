@@ -1,0 +1,4 @@
+# V2 独立向量索引，不提交笔记与向量数据。
+data/
+acceptance/
+design/

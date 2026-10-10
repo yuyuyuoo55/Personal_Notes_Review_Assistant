@@ -1,3 +1,6 @@
+<!-- V2_RELEASE_ENTRY -->
+> **当前 V2 本机版：** [功能、架构与启动说明](v2/README.md)。V2 是 LangGraph RAG Workflow，支持混合检索、按需 Tavily MCP 联网、Markdown/图片/ZIP 导入、智能小测与学习报告。以下原有 Demo 和说明属于 **V1**；GitHub 发布不代表 V2 已部署到 Streamlit Cloud。两个版本独立保留。
+
 <div align="center">
 
 # 个人笔记复习助手

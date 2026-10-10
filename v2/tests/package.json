@@ -1,0 +1,6 @@
+{
+  "name": "personal-notes-v2-browser-tests",
+  "private": true,
+  "scripts": {"test": "node browser_e2e.cjs"},
+  "devDependencies": {"playwright": "1.62.1"}
+}

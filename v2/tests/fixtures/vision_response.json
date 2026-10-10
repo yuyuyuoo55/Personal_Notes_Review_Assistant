@@ -1,0 +1,4 @@
+{
+  "description": "Sanitized protocol replay: generic lifecycle labels only; no paths, credentials or user metadata.",
+  "vision_content": "{\"type\": \"json_object\", \"confirmed_content\": \"需求分析\\n设计\\n编码\\n测试\\n上线运维\", \"uncertain_details\": []}"
+}

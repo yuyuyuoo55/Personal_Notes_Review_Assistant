@@ -1,0 +1,55 @@
+/* 温和绿白色调；使用原生密码输入与按钮，不模拟安全控件。 */
+[data-testid="stAppViewContainer"]{background:radial-gradient(ellipse at 8% 0%,#e3efe4 0,transparent 48%),radial-gradient(ellipse at 95% 25%,#edf3e8 0,transparent 42%),#f7f9f4;color:#26352d}
+[data-testid="stHeader"]{display:none}
+.block-container{max-width:1240px;padding:20px 24px 32px}
+[data-testid="stVerticalBlock"]{gap:12px}
+h1,h2,h3{color:#26352d;letter-spacing:-.025em}
+h1{font-size:28px!important}h2{font-size:21px!important}h3{font-size:18px!important}
+[data-testid="stHeadingWithActionElements"] h3{padding:0 0 4px!important}
+[data-testid="stMarkdownContainer"] p{line-height:1.65}
+[data-testid="stCaptionContainer"] p{font-size:13px;line-height:1.5;color:#536b5b}
+[data-testid="stButton"] button,[data-testid="stFormSubmitButton"] button{border-radius:10px;min-height:42px;font-weight:600}
+[data-testid="stBaseButton-primary"]{background:#2f6249!important;border-color:#2f6249!important}
+[data-testid="stBaseButton-primary"]:disabled{background:#dde7df!important;border-color:#dde7df!important;color:#718177!important}
+[data-testid="stBaseButton-secondary"]{border-color:#dce5dc;background:#f6f8f2}
+[data-testid="stForm"]{border:0;padding:0}
+.st-key-chat_settings,.st-key-knowledge_import,.st-key-knowledge_list,.st-key-quiz_setup,.st-key-quiz_answer,.st-key-report_overview,.st-key-report_core,.st-key-report_strengthen,.st-key-report_memory,.st-key-report_review,.st-key-service_deepseek,.st-key-service_dashscope,.st-key-model_overview,.st-key-deepseek_balance_card{background:#ffffffeb;border:1px solid #dce6dc!important;border-radius:16px;padding:18px!important;box-shadow:0 3px 12px #35574005}
+.st-key-report_core{box-shadow:none}
+.st-key-report_strengthen{border:0!important;border-left:3px solid #c59b60!important;background:#fffaf1;padding:16px 20px!important;box-shadow:none}
+.st-key-report_memory,.st-key-report_review{gap:12px;box-shadow:none}
+.st-key-report_overview{padding:14px 18px!important}
+.st-key-model_overview{padding:14px 18px!important}
+.st-key-model_overview [data-testid="stExpander"]{border:0}
+.st-key-model_overview [data-testid="stExpander"] summary{padding:0;min-height:24px}
+.model-item{display:flex;flex-direction:column;gap:6px}
+.model-item span{font-size:12px;color:#6b7e71}
+.model-item strong{font-size:14px;font-weight:650;overflow-wrap:anywhere;line-height:1.5}
+.service-state{font-size:13px;padding:6px 10px;border-radius:8px;width:fit-content;line-height:1.5;margin-bottom:8px}
+.service-state.verified{color:#2f6249;background:#e8f2e7}.service-state.pending{color:#79602f;background:#faf3df}.service-state.missing{color:#607367;background:#f0f4ee}
+.st-key-delete_deepseek button,.st-key-delete_dashscope button,.st-key-confirm_delete_deepseek button,.st-key-confirm_delete_dashscope button{background:#faf0e8;color:#855345;border-color:#eddacf}
+.st-key-deepseek_balance_card{background:transparent;border:0!important;border-top:1px solid #dce6dc!important;border-radius:0;box-shadow:none;gap:6px;padding:12px 0 0!important}
+.st-key-deepseek_balance_card [data-testid="stMetricValue"]{color:#2f6249;font-size:24px}
+.st-key-deepseek_balance_card [data-testid="stCaptionContainer"] p{font-size:12px}
+[data-testid="stMetricValue"]{font-size:24px;color:#2f6249}
+[data-testid="stPageLink"] a{border-radius:10px;padding:8px 12px;min-height:40px}
+/* 对话角色样式明确，不把每条消息包成相同的大白卡。 */
+[data-testid="stChatMessage"]{background:transparent;border:0;border-radius:0;padding:10px 4px}
+[class*="st-key-chat_user_"] [data-testid="stChatMessage"]{background:#e3eddd;border-radius:18px 18px 4px 18px;padding:12px 16px;flex-direction:row-reverse}
+[class*="st-key-chat_user_"]>[data-testid="stElementContainer"]{max-width:82%}
+[class*="st-key-chat_assistant_"] [data-testid="stChatMessage"]{padding:12px 0;max-width:94%}
+[data-testid="stChatMessageContent"]{min-width:0;overflow-wrap:anywhere}
+[data-testid="stChatMessage"] [data-testid="stExpander"]{background:transparent;border:0;border-top:1px solid #dee7da;border-radius:0}
+.st-key-chat_history_panel{background:#ffffff55;border-radius:16px;padding:16px 20px!important}
+.st-key-chat_welcome{padding:70px 36px 30px!important;max-width:620px;margin:auto}
+.st-key-chat_welcome h3{font-size:26px!important}
+.st-key-chat_settings{padding:14px!important;background:transparent;border:0!important;box-shadow:none}
+.st-key-chat_settings h3{font-size:16px!important}
+div[data-testid="stExpander"]{border-color:#dce6dc;border-radius:10px;background:#ffffff70}
+[data-testid="stFileUploaderDropzone"]{padding:16px}
+.brand{font-size:20px;font-weight:750;color:#2f6249;white-space:nowrap;line-height:40px}
+.page-heading{margin:10px 0 4px}
+.page-heading h1{padding:0!important;margin:0 0 6px;line-height:1.35}
+.page-heading p{margin:0;color:#6b7e71;font-size:14px}
+.st-key-top_navigation{padding-bottom:12px;border-bottom:1px solid #d9e3d8}
+@media(max-width:1300px){.block-container{padding:16px 24px 28px}.page-heading{margin-top:8px}.st-key-service_deepseek,.st-key-service_dashscope{padding:16px!important}}
+@media(max-width:700px){.block-container{padding:12px 16px}.brand{font-size:16px}.page-heading h1{font-size:24px!important}.st-key-chat_welcome{padding:30px 8px!important}[class*="st-key-chat_user_"] [data-testid="stChatMessage"]{max-width:92%}}

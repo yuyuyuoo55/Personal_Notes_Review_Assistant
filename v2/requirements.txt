@@ -1,0 +1,7 @@
+# V2 本机完整工作流；根依赖继续服务 V1，不修改 V1 的安装方式。
+-r ../requirements.txt
+-r requirements-mcp.txt
+langgraph>=1.2,<2
+pkuseg==0.0.25
+sentence-transformers>=5.7,<6
+torch>=2.13,<3
