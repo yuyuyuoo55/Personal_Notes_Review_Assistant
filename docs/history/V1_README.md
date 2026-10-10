@@ -1,0 +1,379 @@
+> 历史文档：保留自 V2 发布提交 `30137fd` 的 V1 README 正文，仅修正归档后的相对链接。下文功能、评测数字和在线地址均属于 V1；不代表当前 V2。在线地址本次未验证恢复。当前版本见 [仓库首页](../../README.md)。
+
+<div align="center">
+
+# 个人笔记复习助手
+
+**把 Markdown 和图片笔记变成可问答、可小测、可追溯的个人复习空间。**
+
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![在线体验](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)
+[![Tests](https://img.shields.io/badge/tests-64%20passed-4f7a63)](#测试与验证)
+[![License](https://img.shields.io/badge/license-MIT-d0a64a)](../../LICENSE)
+
+上传 Markdown、图文 ZIP 或单张图片，用自然语言复习自己的资料。回答会附带来源文件、章节和原文片段；检索不到可靠依据时明确拒答。
+
+🚀 **在线体验：** [打开 Streamlit Demo](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)（首次打开可能需要等待应用唤醒；请在“设置”中填写自己的 DeepSeek API Key，勿分享或提交密钥。）
+
+[核心能力](#项目亮点) · [快速开始](#快速开始) · [技术架构](#技术架构) · [回归评测](#回归评测) · [API](#api) · [已知边界](#已知边界)
+
+</div>
+
+![项目定位](../images/social-preview.png)
+
+## 界面预览
+
+### 章节小测
+
+从真实 Markdown 笔记或章节生成 2 道单选题和 1 道简答题。
+
+![章节小测](../images/project-overview.png)
+
+### 智能问答与自动路由
+
+基础对话直接回复，笔记知识问题进入统一混合检索，并展示当前处理链路。
+
+![智能问答与自动路由](../images/intelligent-chat.png)
+
+> 这是一个可本地运行的个人学习型 MVP，不是企业级知识库平台。用户 DeepSeek Key 仅在当前会话和单次请求中使用；笔记、索引和日志默认保存在本机且不提交 Git。
+
+## 项目亮点
+
+- **回答可追溯**：答案附带来源文件、标题路径和原文片段，不只返回模型文本。
+- **自动路由**：问候、身份和使用说明由规则直接回复；知识问题进入查询改写、混合召回、融合与精排，用户无需选择技术模式。
+- **面向中文笔记**：BM25 使用 `pkuseg` 分词，并与向量检索进行 RRF 排名融合。
+- **资料不足拒答**：检索结果不可靠时提示补充笔记，不使用联网知识强行回答。
+- **本地数据持久化**：原始 Markdown、导入图片、Chroma 向量索引和 BM25 索引均保存在本机。
+- **流式交互**：FastAPI 通过 SSE 返回检索阶段、来源、回答 token 和耗时。
+- **BYOK 成本隔离**：每位用户在页面填写自己的 DeepSeek Key，后端按请求使用，不落库、不写日志。
+- **余额查询**：Key 验证通过后，每次进入设置页会自动查询并显示当前 DeepSeek 总余额。
+- **多模态图片检索**：支持 Markdown 内图片和独立图片笔记；图片保存在本地并生成可检索描述，命中来源后可查看原图。聊天图片先转成描述并仅用于辅助检索，不直接作为回答依据。
+- **章节小测**：从 Markdown 整篇或具体章节固定生成 2 道单选题和 1 道简答题；选择题由代码判分，简答题依据原文评分并生成核心考点、易错点和记忆方法。
+- **知识库数据看板**：展示笔记总数、片段总数、各笔记片段分布和文档类型占比，并使用多色编码区分数据。
+
+当前支持 `.md`、`.zip`、`.jpg`、`.jpeg`、`.png`、`.webp` 导入；ZIP 中必须包含一份 Markdown，可同时携带配套图片。通用批量导入、笔记更新和多用户能力尚未实现。
+
+## 自动路由与统一检索设计
+
+基础问候、身份和使用说明由本地规则直接回复，不调用模型也不检索。其余知识问题执行：查询改写 → 向量 Top-6 + BM25 Top-6 → RRF → Cross-Encoder → Top-3 → 基于笔记生成。聊天图片的描述只扩充检索查询，不作为最终回答依据；图片查询的候选还必须通过向量相关性门控。旧客户端传入 `fast` 或 `accurate` 时仍可兼容，但实际执行同一知识检索链路。
+
+项目早期曾提供快速和精确两种模式，并用固定题集做过对比。后来考虑到用户难以判断该选哪一种，而复习场景更需要专注任务本身，因此取消前端模式选择，改为由系统自动路由：基础对话本地回复，知识问题进入统一 RAG 工作流，复习任务进入章节小测。历史评测数据仍保留为这次产品决策的依据。
+
+## 页面功能
+
+| 页面 | 主要功能 |
+| --- | --- |
+| 智能复习 | 智能问答与章节小测同页切换；支持图片辅助检索、流式回答、来源追溯、作答评分和复盘 |
+| 知识库 | 导入 Markdown、图文 ZIP 或单张图片，查看文件类型、导入时间和片段数，支持删除与清空 |
+| 数据看板 | 查看笔记规模、片段分布和文档类型占比 |
+| 设置 | 在当前会话内验证或清除 DeepSeek Key，并自动显示当前总余额 |
+| 关于 | 查看项目定位、技术栈和开源地址 |
+
+## 快速开始
+
+环境要求：Windows 10/11、Python `3.12.x`、[uv](https://docs.astral.sh/uv/)，并可访问 DeepSeek、DashScope 和 Hugging Face。
+
+```powershell
+git clone https://github.com/yuyuyuoo55/Personal_Notes_Review_Assistant.git
+cd Personal_Notes_Review_Assistant
+uv venv --python 3.12
+uv pip install -r requirements.txt
+Copy-Item .env.example .env
+```
+
+在 `.env` 中至少配置 Embedding Key：
+
+```dotenv
+DASHSCOPE_API_KEY=YOUR_API_KEY_HERE
+```
+
+然后双击 `启动项目.cmd`。浏览器打开后，进入“设置”填写并验证自己的 DeepSeek Key，再到“知识库”导入资料。
+
+> DeepSeek Key 不写入 `.env`。完整的手动启动、可选精排和模型后备说明见[完整安装与运行](#完整安装与运行)。
+
+## 技术架构
+
+```mermaid
+flowchart LR
+    U[用户] --> UI[Streamlit 界面]
+    UI --> ROUTER{任务路由}
+    ROUTER -->|问候/使用说明| BASIC[本地直接回复]
+    ROUTER -->|笔记问题| RAG[统一 RAG 工作流]
+    ROUTER -->|复习任务| QUIZ[章节小测]
+
+    UI --> INGEST[Markdown / 独立图片导入]
+    INGEST --> FILES[(本地原文)]
+    INGEST --> EMB[DashScope Embedding]
+    EMB --> CHROMA[(Chroma)]
+
+    RAG --> QUESTION[用户问题]
+    RAG -->|聊天图片| VISION[DeepSeek Vision 生成描述]
+    VISION --> HINT[图片描述辅助检索]
+    HINT --> REWRITE[查询改写]
+    QUESTION --> REWRITE
+    REWRITE --> DENSE[向量检索 Top-6]
+    REWRITE --> BM25[BM25 Top-6]
+    DENSE --> RRF[RRF 融合]
+    BM25 --> RRF
+    RRF --> RERANK[Cross-Encoder 精排 Top-3]
+
+    RERANK --> LLM[DeepSeek 基于笔记生成]
+    QUIZ --> EVIDENCE[章节原文编号与依据校验]
+    EVIDENCE --> QGEN[2 道单选 + 1 道简答]
+    QGEN --> SCORE[代码判选择题 + 模型判简答题]
+    SCORE --> REVIEW[考点 / 易错点 / 记忆方法]
+```
+
+### 笔记导入流程
+
+```mermaid
+flowchart LR
+    A[上传 Markdown 或图片] --> B[格式/空文件/重名校验]
+    B --> IMG{独立图片或 Markdown 内图片?}
+    IMG -->|是| LOCAL[保存到文档专属 images 目录]
+    LOCAL --> VLM[DeepSeek Vision / 可选 Qwen-VL]
+    VLM --> C[描述回填 Markdown + 生成图片块]
+    IMG -->|否| C
+    C --> H[按 H1/H2/H3 标题切分]
+    H --> D[生成稳定 chunk_id]
+    D --> E[DashScope Embedding]
+    E --> F[写入 Chroma]
+    F --> G[下次查询时重建 BM25]
+```
+
+## 核心代码地图
+
+| 模块 | 文件 | 负责内容 |
+| --- | --- | --- |
+| API 入口 | `backend/app/main.py` | 注册健康检查、笔记、问答、Key 与余额路由 |
+| 笔记导入 | `backend/app/api/notes.py` | 上传校验、保存、切分、向量化与失败回滚 |
+| 统一检索编排 | `backend/app/services/rag_service.py` | 查询改写、阈值判断、混合检索、精排与生成 |
+| 章节小测 | `backend/app/services/quiz_service.py` | 章节上下文、2 单选 + 1 简答生成、依据校验、评分与复盘 |
+| 历史 Agent 实现 | `backend/app/services/agent_service.py` | 保留早期快速模式实现，当前问答链路不再调用 |
+| Markdown 切分 | `backend/app/services/note_splitter.py` | 标题感知切分和稳定 `chunk_id` |
+| 混合检索 | `bm25_retriever.py` / `rrf_fusion.py` | 中文关键词召回与排名融合 |
+| 精排 | `backend/app/services/reranker.py` | `BAAI/bge-reranker-base` Cross-Encoder 精排 |
+| 向量存储 | `backend/app/storage/vector_store.py` | DashScope Embedding 和 Chroma 持久化 |
+| Key 与余额 | `backend/app/api/key_validate.py` | 请求级 Key 验证和 DeepSeek 当前余额查询 |
+| 前端 | `streamlit_demo.py` | 单体部署入口；负责导航、自动路由、问答、小测、来源卡片、余额和数据看板 |
+| 分离式前端 | `frontend/app.py` | 本地双进程部署时通过 FastAPI + SSE 完成问答 |
+| 回归评测 | `eval_rag.py` | 统一链路的 31 题检索、拒答、延迟与 Markdown 报告生成 |
+
+## 回归评测
+
+仓库提供一份 10 题轻量回归脚本。它不是通用 RAG 准确率评测：其中 9 题可按“来源文件是否命中”或“是否出现拒答措辞”自动判定，第 10 题需要人工检查回答质量。
+
+一次本机回归快照（2026-08-24）：
+
+| 模式 | 可自动判定题 | 规则命中 | 未命中案例 |
+| --- | ---: | ---: | --- |
+| 快速模式 | 9 | 7/9 | 2 道资料不足问题未按预期拒答 |
+| 精确查找 | 9 | 9/9 | 无 |
+
+完整逐题结果见 [`eval_result_20260824_010958.md`](../../eval_result_20260824_010958.md)。这里的 `9/9` 表示当前规则命中，不等同于答案准确率、召回率或生产环境指标；单次耗时也会受到网络、模型缓存和 API 状态影响。
+
+### 三层评测（最新，`eval_rag.py`）
+
+`eval_rag.py` 做「检索层 + 生成层 + 应用层」三层评测：固定 31 道题（覆盖 Git/Docker/Linux/Maven/Vue + 拒答边界题，分 easy/medium/hard 三档难度），对当前统一检索链路逐题测试，自动判定 Recall@3、MRR、拒答和延迟；忠实度用 DeepSeek 作裁判（LLM-as-judge，仅作定性参考）。
+
+合并前的本机双模式基线（2026-09-13）：
+
+| 模式 | Recall@3 | MRR | 拒答 | 平均延迟 |
+| --- | ---: | ---: | ---: | ---: |
+| 快速模式 | 28/28 | 1.0 | 2/3 | ~3.4s |
+| 精确查找 | 28/28 | 0.982 | 2/3 | ~9.6s |
+
+**按难度分层**（来源命中题）：两种模式在 easy / medium / hard 三档均为满分（easy 5/5、medium 18/18、hard 5/5）。
+
+**说明**：这组数据是统一链路上线前的对比基线，不代表当前存在两个可选模式。31 题里 28 道为「来源命中」题、3 道为「应拒答」题；本轮两种旧模式拒答均为 2/3。精确模式曾在 2026-09-08 跑出 3/3，但没有稳定复现，说明生成层存在模型波动。统一链路的新快照将在本次改造后重新生成。
+
+> 均为本地固定题集、小规模、人工复核，不等同于线上生产指标。
+
+### 这份结果如何跑出来
+
+1. 准备并导入与 `eval_10questions.py` 中 `QUESTIONS` 对应的脱敏 Markdown 笔记。
+2. 启动后端，确保 `http://127.0.0.1:8000/api/health` 可访问。
+3. 执行：
+
+```powershell
+uv run python eval_10questions.py
+```
+
+4. 脚本对每道题分别请求 `fast` 和 `accurate` 模式，解析 SSE 中的来源与回答。
+5. `file:xxx` 检查来源文件名，`refuse` 检查拒答关键词，`any` 留给人工判断。
+6. 运行后生成 `eval_result_YYYYMMDD_HHMMSS.md`，还需人工复核回答是否真的被来源支持。
+
+> 出于隐私考虑，个人笔记和本地索引未提交到仓库，因此新克隆项目不能直接复现上述固定分数。请先替换为自己的脱敏测试笔记，并相应修改 `QUESTIONS`。
+
+## 完整安装与运行
+
+### 1. 环境要求
+
+- Windows 10/11（仓库提供 Windows 一键启动脚本）
+- Python `3.12.x`
+- [uv](https://docs.astral.sh/uv/)
+- 可访问 DeepSeek、DashScope 和 Hugging Face
+
+默认轻量依赖会让统一链路降级为“混合检索 + RRF”。如需 Cross-Encoder 精排，请按 `requirements.txt` 顶部注释安装 `sentence-transformers` 和 `torch`；首次使用会下载 `BAAI/bge-reranker-base`。
+
+### 2. 克隆并安装依赖
+
+```powershell
+git clone https://github.com/yuyuyuoo55/Personal_Notes_Review_Assistant.git
+cd Personal_Notes_Review_Assistant
+uv venv --python 3.12
+uv pip install -r requirements.txt
+```
+
+### 3. 配置环境变量
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` 由部署者维护，不填写用户 DeepSeek Key。至少配置 Embedding：
+
+```dotenv
+DASHSCOPE_API_KEY=YOUR_API_KEY_HERE
+```
+
+如需启用部署者付费的 Qwen-VL 后备，可配置：
+
+```dotenv
+VLM_FALLBACK_TO_QWEN=false
+```
+
+默认不启用后备。若开启 `VLM_FALLBACK_TO_QWEN=true`，DeepSeek 图片识别失败后会使用部署者的 DashScope Key，相关费用由部署者承担。OSS 旧配置可以保留，但已不参与图片主链路。
+
+不要把真实 Key 写入 README、截图、日志或 Git 提交。
+
+### 4. 启动项目
+
+推荐双击根目录的 `启动项目.cmd`。启动器会：
+
+- 检查 8000、8501 端口；
+- 后台启动 FastAPI 与 Streamlit；
+- 写入 `logs/backend.log`、`logs/frontend.log`；
+- 打开 `http://127.0.0.1:8501`。
+
+也可以手动启动。第一个 PowerShell：
+
+```powershell
+uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+第二个 PowerShell：
+
+```powershell
+uv run streamlit run streamlit_demo.py --server.address 127.0.0.1 --server.port 8501
+```
+
+访问地址：
+
+- 前端：`http://127.0.0.1:8501`
+- API 文档：`http://127.0.0.1:8000/docs`
+- 健康检查：`http://127.0.0.1:8000/api/health`
+
+### 5. 使用步骤
+
+1. 打开顶部导航的“设置”，填写自己的 DeepSeek API Key，点击“保存并验证”；验证通过后会显示当前余额并解锁其他功能。
+2. 进入“知识库”，上传一份非空 `.md` 笔记、一张 `.jpg`、`.jpeg`、`.png`、`.webp` 图片，或一个包含一份 Markdown 与配套图片的 `.zip`。
+3. 文档包含本地图片时，建议将图片放入 Markdown 同级的 `images/` 目录，并保持 `![说明](images/文件名.png)` 相对路径后整体压缩为 ZIP。
+4. 点击“导入文件”，等待图片描述、切分与向量化完成。旧文档中的本地绝对路径会在 ZIP 内按唯一文件名尝试匹配。
+5. 返回“智能复习”，在“智能问答”中直接输入问题查看回答与来源；基础说明直接回复，知识问题自动进入统一检索。
+6. 如需用图片查笔记，在聊天输入框下方选择图片并输入问题；系统会用图片描述辅助检索，最终回答只依据命中的笔记资料。没有可靠笔记时会明确提示资料不足。
+7. 切换到“章节小测”，选择笔记与章节，生成 2 道单选题和 1 道简答题；提交后查看总分、逐题反馈、参考答案和原文依据。
+8. 进入“数据看板”，查看笔记总数、片段分布和资料类型占比。
+
+用户 Key 只保存在当前 Streamlit `session_state`，并通过 `X-DeepSeek-API-Key` 请求头传给后端；不会写入数据库、配置文件或日志。
+
+同名文件会返回 409；当前版本不支持覆盖导入，请先在本机数据目录中处理旧数据后再导入。
+
+## 测试与验证
+
+```powershell
+uv run pytest -q
+```
+
+当前版本本机回归结果为 `64 passed`。测试覆盖健康检查、缺 Key、Key 验证、余额查询、图片辅助检索、错图过滤、历史索引隔离、大图压缩、章节小测生成与评分、常见模型字段兼容、题干标点修正、图片与笔记命中/未命中、纯文本兼容、错误降级、Markdown 图文 ZIP、笔记删除、本地图片块、独立图片清单恢复、模型实例隔离和 Key 不落日志；自动化测试中的外部 API 均使用 Mock，不产生费用。
+
+多模态回归用例位于 `tests/test_multimodal.py`：验证图片描述只进入检索查询、不进入最终回答资料，同时检查无笔记命中时拒答、纯文本兼容、本地图片块及来源 metadata。
+
+## 工程结构
+
+```text
+Personal_Notes_Review_Assistant/
+├─ backend/
+│  └─ app/
+│     ├─ api/                 # FastAPI 路由
+│     ├─ core/                # 配置与日志
+│     ├─ schemas/             # 请求/响应 DTO
+│     ├─ services/            # 切分、检索、融合、精排、Agent、生成
+│     └─ storage/             # Chroma 与 Embedding
+├─ streamlit_demo.py          # 本地与 Streamlit Cloud 共用的 Streamlit 前端
+├─ frontend/app.py            # FastAPI 分离部署版前端（保留）
+├─ tests/                     # 工程烟雾测试
+├─ docs/images/               # README 展示图片
+├─ eval_rag.py                # 当前统一链路 31 题回归脚本
+├─ eval_10questions.py        # 历史双模式回归脚本
+├─ eval_result_*.md           # 单次评测快照
+├─ start_all.ps1              # Windows 启动器
+├─ 启动项目.cmd               # 双击入口
+├─ pyproject.toml             # uv 项目与依赖配置
+└─ .env.example               # 脱敏配置模板
+```
+
+运行时会创建 `data/uploads`、`data/chroma`、`data/bm25` 和 `logs`。这些目录以及 `.env` 已加入 `.gitignore`，不会上传个人笔记、索引、日志或密钥。
+
+## API
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/notes` | 查询已导入笔记及片段数 |
+| `POST` | `/api/notes/import` | 上传 `.md`、图文 `.zip` 或单张图片，表单字段名为 `file` |
+| `POST` | `/api/chat` | SSE 问答；默认执行统一混合检索 |
+| `POST` | `/api/chat/image` | multipart 图片辅助检索；字段为 `query`、`image` 和兼容字段 `conversation_id` |
+| `POST` | `/api/key/validate` | 验证请求头中的 DeepSeek Key，不保存 Key |
+| `GET` | `/api/key/balance` | 查询当前 DeepSeek 总余额，不保存 Key |
+
+`/api/notes/import`、`/api/chat`、`/api/chat/image`、`/api/key/validate` 和 `/api/key/balance` 都要求请求头：
+
+```http
+X-DeepSeek-API-Key: YOUR_API_KEY_HERE
+```
+
+`POST /api/chat` 请求示例：
+
+```json
+{
+  "query": "Git 的分支有什么用？",
+  "conversation_id": "your-session-id"
+}
+```
+
+## 已知边界
+
+- 支持单个 Markdown、单张图片或“一份 Markdown + 配套图片”的 ZIP；暂不支持 RAR、PDF、通用批量导入和更新。
+- 单个 `.md` 无法携带用户电脑上的本地图片文件；文档图片增强支持公网 HTTPS 图片和 data URI，本地绝对路径会提示后跳过。
+- 本地保存或 VLM 单图失败不会中断整篇文档，但该图片不会获得可检索描述。
+- 当前统一链路不使用多轮会话记忆，每个问题都基于本次查询和笔记回答。
+- Cross-Encoder 首次加载较慢，且当前没有最低精排分阈值。
+- 自动评测依赖特定测试笔记，固定分数不能直接迁移到其他知识库。
+- 当前没有用户系统、权限隔离、云端同步或生产部署配置。
+- 章节小测当前固定为 3 题并使用会话缓存；尚未实现跨设备错题同步和长期学习记录。
+
+## 安全说明
+
+- `.env`、个人笔记、向量索引、BM25 索引和日志默认不提交。
+- 用户 DeepSeek Key 只存在当前页面会话与单次请求内存中，不入库、不写日志、不拼进 Prompt。
+- 部署者 DashScope Key 只由后端 `.env`/Streamlit Secrets 读取，绝不返回前端；OSS 旧配置不再参与图片链路。
+- 上传前请先移除笔记中的姓名、账号、公司内部信息等隐私内容。
+- 模型问答与向量化会调用外部 API；敏感资料不应直接导入。
+- 项目不联网搜索补充答案，但模型服务本身仍是外部依赖。
+
+## License
+
+本项目采用 [MIT License](../../LICENSE)。
