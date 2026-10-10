@@ -151,7 +151,7 @@ def select_web_node(state: ChatState) -> Literal["web_search", "rag_answer"]:
     return "rag_answer"
 
 
-async def web_search_node(state: ChatState) -> dict:
+async def web_search_node(state: ChatState, *, search=None) -> dict:
     """
     【业务需求】联网开启时调用 Tavily MCP，供联合回答使用。
     【输入】State.rewritten_query。
@@ -167,14 +167,14 @@ async def web_search_node(state: ChatState) -> dict:
         return {"web_results": [], "web_error": None}
     # 2. 网络失败只返回安全提示，不输出可能包含认证信息的异常正文。
     try:
-        web_results = await search_web(query)
+        web_results = await (search or search_web)(query)
     except Exception:
         return {"web_results": [], "web_error": "联网搜索失败，请检查 Tavily 配置或网络；本轮未获取实时网页资料。"}
     # 3. 真实结果保存在 State，由回答节点整理网页 Context。
     return {"web_results": web_results, "web_error": None}
 
 
-def build_graph(model, vector_store=None, top_k=3, *, answer_model=None):
+def build_graph(model, vector_store=None, top_k=3, *, answer_model=None, web_search=None):
     """
     【业务需求】
     构建一个根据用户问题自动选择业务分支的工作流。
@@ -434,7 +434,10 @@ def build_graph(model, vector_store=None, top_k=3, *, answer_model=None):
     builder.add_node("bm25_retrieval", bm25_retrieval_node)
     builder.add_node("rrf_fusion", rrf_fusion_node)
     builder.add_node("reranker", reranker_node)
-    builder.add_node("web_search", web_search_node)
+    async def configured_web_search(state):
+        return await web_search_node(state, search=web_search)
+
+    builder.add_node("web_search", configured_web_search)
 
     # 5. 设置起点
     builder.add_edge(START, "router")

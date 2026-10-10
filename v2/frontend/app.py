@@ -30,7 +30,9 @@ try:
         st.session_state["restart_notice"] = True
     st.session_state["backend_instance"] = health["instance_id"]
     st.session_state["health"] = health
-    columns[5].caption("● 离线联调服务" if health.get("test_mode") else "● 本机服务已连接")
+    columns[5].caption("● 离线联调服务" if health.get("test_mode") else "● 云端会话已连接" if health.get("cloud_demo") else "● 本机服务已连接")
+    if health.get("cloud_demo"):
+        st.info("V2 云端临时演示：各浏览器会话独立，使用你自己的 Key；刷新、休眠或重启可能清空资料与小测。闲置 30 分钟后清理。请勿上传敏感资料。")
     if health.get("test_mode"):
         st.caption("离线联调 · Fake 模型 / Mock HTTP / 临时 Chroma；不代表真实模型质量验收。")
 except BackendError:

@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from . import chat, notes, quiz, settings
-from .runtime import ApiError, Runtime
+from .runtime import ApiError, Runtime, runtime_from
 
 
 class UploadBodyLimit:
@@ -61,9 +61,9 @@ def create_app(runtime=None):
         return JSONResponse({'status':'internal_error','data':None,'message':'服务处理失败。'},status_code=500)
 
     @app.get('/health', tags=['health'])
-    async def health():
+    async def health(request: Request):
         import os
-        runtime = app.state.runtime
+        runtime = runtime_from(request)
         return {'status':'ok','data':{'service':'v2','quiz_store':'in_process','single_user':True,
             'instance_id':runtime.instance_id,'test_mode':runtime.test_mode,
             'embedding_provider':'fake' if runtime.test_mode else 'dashscope',
@@ -71,7 +71,8 @@ def create_app(runtime=None):
             'text_model':'Fake Model' if runtime.test_mode else os.getenv('DEEPSEEK_TEXT_MODEL','deepseek-v4-flash'),
             'vision_model':'Fake Vision' if runtime.test_mode else os.getenv('DEEPSEEK_VISION_MODEL','deepseek-flash'),
             'embedding_model':'Mock Embedding' if runtime.test_mode else 'text-embedding-v4',
-            'settings_enabled':bool(runtime.settings_token and runtime.keys.storage)}}
+            'settings_enabled':bool(runtime.settings_token and runtime.keys.storage),
+            'cloud_demo':bool(getattr(runtime,'cloud_demo',False))}}
 
     app.include_router(notes.router)
     app.include_router(chat.router)

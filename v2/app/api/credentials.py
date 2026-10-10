@@ -122,8 +122,9 @@ def verify_key(provider, secret, *, transport=None):
 
 
 class KeyManager:
-    def __init__(self, storage, *, environment=None, validator=verify_key):
+    def __init__(self, storage, *, environment=None, validator=verify_key, storage_source="windows_credentials"):
         self.storage = storage
+        self.storage_source = storage_source
         self.environment = os.environ if environment is None else environment
         self.validator = validator
 
@@ -141,7 +142,7 @@ class KeyManager:
         secret = "" if disabled else record.secret if record else self.environment.get(PROVIDERS[provider], "")
         return {"provider":provider,"configured":bool(secret),
                 "masked_key": "••••" + secret[-4:] if len(secret)>=12 else "已配置" if secret else "",
-                "source":"disabled" if disabled else "windows_credentials" if record else "environment" if secret else "none",
+                "source":"disabled" if disabled else self.storage_source if record else "environment" if secret else "none",
                 "validation_state":"verified" if record else "not_verified" if secret else "not_configured",
                 "capabilities":record.metadata.get("capabilities",[]) if record else [],
                 "validated_at":record.metadata.get("validated_at") if record else None}

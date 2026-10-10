@@ -430,7 +430,8 @@ def report_page():
 
 def settings_page():
     health=st.session_state.get("health",{})
-    title("","模型服务设置","本机服务已连接 · 管理访问凭据与账户余额" if health else "本机服务未连接")
+    cloud = health.get("cloud_demo", False)
+    title("","模型服务设置", "云端临时会话 · 使用自己的访问凭据" if cloud else "本机服务已连接 · 管理访问凭据与账户余额" if health else "本机服务未连接")
     try:
         statuses=ApiClient().request("GET","/settings/providers")["data"]
     except BackendError as error:
@@ -465,7 +466,7 @@ def settings_page():
                 status_text="未配置 · 已禁用 .env 回退" if current["source"]=="disabled" else "未配置"
                 st.markdown('<div class="service-state missing" role="status">'+html.escape(status_text)+'</div>',unsafe_allow_html=True)
             if st.session_state.get("deleting_"+provider):
-                st.warning("删除保存的 Key 后将回退 .env（若已配置）。确定删除吗？" if provider=="dashscope" else "删除后该服务将禁用，且不会自动使用 .env 的另一把 Key。确定删除吗？")
+                st.warning("删除当前会话 Key，不会使用服务器环境密钥。确定删除吗？" if cloud else "删除保存的 Key 后将回退 .env（若已配置）。确定删除吗？" if provider=="dashscope" else "删除后该服务将禁用，且不会自动使用 .env 的另一把 Key。确定删除吗？")
                 a,b=st.columns(2)
                 if a.button("确认删除",key="confirm_delete_"+provider):
                     try:
@@ -517,7 +518,7 @@ def settings_page():
         st.write("文本模型："+health.get("text_model","未知"))
         st.write("视觉模型："+health.get("vision_model","未知"))
         st.caption("DeepSeek 文本验证不代表视觉权限已验收。Embedding 固定为 DashScope，不重建已有知识库。")
-        st.caption("仅可信本机单用户。密钥保存在 Windows 系统凭据，不进入浏览器存储、Chroma、普通 JSON 或日志。")
+        st.caption("云端 Key 仅保留在服务器的当前会话内存中，不写普通文件；页面密码输入会发送到该演示服务及对应供应商。闲置或重启后清除，无服务器 Key 回退。" if cloud else "仅可信本机单用户。密钥保存在 Windows 系统凭据，不进入浏览器存储、Chroma、普通 JSON 或日志。")
 
 
 def render_balance(configured):

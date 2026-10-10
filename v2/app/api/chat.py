@@ -32,7 +32,8 @@ async def chat_events(request, runtime, payload):
         yield event("status", {"stage": "processing"})
         def prepare():
             model = runtime.model_factory()
-            return build_graph(model, DeferredGraphStore(runtime), answer_model=StreamingAnswerModel(model))
+            return build_graph(model, DeferredGraphStore(runtime), answer_model=StreamingAnswerModel(model),
+                               web_search=runtime.web_search)
         graph = await run_job(runtime, prepare)
         # 整段流都占用业务锁，避免生成中途更换 Key 或同时启动导入。
         if not runtime.job_lock.acquire(blocking=False):

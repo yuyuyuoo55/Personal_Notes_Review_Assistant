@@ -40,14 +40,23 @@ def parse_sse(lines):
 
 class ApiClient:
     def __init__(self, base_url=None, settings_token=None):
-        self.base_url = base_url or os.getenv("V2_API_URL", "http://127.0.0.1:8000")
+        # 云端连接仅存在当前 Streamlit 服务端会话，不写进进程环境。
+        connection = {}
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx(suppress_warning=True) is not None:
+            import streamlit as st
+            connection = st.session_state.get("_cloud_connection", {})
+        self.session_token = connection.get("token", "")
+        self.base_url = base_url or connection.get("url") or os.getenv("V2_API_URL", "http://127.0.0.1:8000")
         parsed = urlsplit(self.base_url)
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.username:
             raise ValueError("本版本仅连接本机 HTTP 服务。")
-        self.settings_token = os.getenv("V2_SETTINGS_TOKEN", "") if settings_token is None else settings_token
+        self.settings_token = (connection.get("token") or os.getenv("V2_SETTINGS_TOKEN", "")) if settings_token is None else settings_token
 
     def request(self, method, path, **kwargs):
-        headers = {"X-V2-Settings-Token":self.settings_token} if path.startswith("/settings/") else {}
+        headers = {"X-V2-Session-Token":self.session_token} if self.session_token else {}
+        if path.startswith("/settings/"):
+            headers["X-V2-Settings-Token"] = self.settings_token
         try:
             with httpx.Client(base_url=self.base_url, timeout=210, trust_env=False, follow_redirects=False) as client:
                 reply = client.request(method, path, headers=headers, **kwargs)
@@ -70,7 +79,8 @@ class ApiClient:
         """
         try:
             with httpx.Client(base_url=self.base_url, timeout=210, trust_env=False) as client:
-                with client.stream("POST", "/chat/stream", json=payload) as reply:
+                with client.stream("POST", "/chat/stream", json=payload,
+                                   headers={"X-V2-Session-Token":self.session_token} if self.session_token else {}) as reply:
                     if reply.status_code!=200 or "text/event-stream" not in reply.headers.get("content-type",""):
                         raise BackendError("问答请求未建立，请检查服务。")
                     for name, data in parse_sse(reply.iter_lines()):

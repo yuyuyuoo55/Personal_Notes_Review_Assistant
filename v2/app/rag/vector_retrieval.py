@@ -52,7 +52,7 @@ class VectorResult(TypedDict):
 
 # =============== Step 4：初始化向量数据库 ===============
 
-def create_vector_store(directory=None, *, api_key=None) -> Chroma:
+def create_vector_store(directory=None, *, api_key=None, collection_name=COLLECTION_NAME) -> Chroma:
     """
     【业务需求】
     初始化 Embedding 模型和独立的 V2 Chroma 向量数据库。
@@ -79,7 +79,7 @@ def create_vector_store(directory=None, *, api_key=None) -> Chroma:
 
     # 3. Chroma 自动处理底层连接和集合创建。
     vector_store = Chroma(
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name,
         embedding_function=embedding,
         persist_directory=str(database_path),
     )

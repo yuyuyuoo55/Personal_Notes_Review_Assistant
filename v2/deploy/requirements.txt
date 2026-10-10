@@ -1,0 +1,4 @@
+# Cloud 独立入口使用完整 V2 依赖，不改 V1。CPU torch 避免 CUDA 包。
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+-r ../requirements.txt

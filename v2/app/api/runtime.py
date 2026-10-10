@@ -25,10 +25,11 @@ class Runtime:
     """可注入离线模型/存储；连接延迟创建，不在健康检查时调用模型。"""
     def __init__(self, *, store_factory=create_vector_store, model_factory=create_model,
                  vision=None, upload_root=None, timeout=180, keys=None, settings_token=None, test_mode=False,
-                 balance_reader=fetch_balance):
+                 balance_reader=fetch_balance, web_search=None):
         self.settings_token = settings_token if settings_token is not None else os.getenv("V2_SETTINGS_TOKEN", "")
         self.keys = keys or KeyManager(WindowsCredentials() if self.settings_token and os.name == "nt" else None)
         self.balance_reader = balance_reader
+        self.web_search = web_search
         self.instance_id = uuid4().hex
         self.test_mode = test_mode
         self.store_factory = self.configured_store if store_factory is create_vector_store else store_factory
@@ -94,7 +95,7 @@ async def run_job(runtime, function, *args, **kwargs):
 
 
 def runtime_from(request: Request):
-    return request.app.state.runtime
+    return getattr(request.state, "runtime", None) or request.app.state.runtime
 
 
 def response(data, *, http_status=None):

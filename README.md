@@ -4,7 +4,7 @@
 
 当前主版本是 **V2：LangGraph RAG Workflow + FastAPI + Streamlit**。导入 Markdown、图片或图文 ZIP 后，既能围绕原文提问，也能通过小测发现错误并生成复习建议。工作流由代码确定；Router 分类问题，不是模型自主选择工具的 Agent。
 
-**发布状态：源码已发布，本机运行；V2 尚未上线公网。** [V2 详细说明](v2/README.md) · [发布验证](v2/RELEASE_VALIDATION.md) · [在线部署评估](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md) · [V1 历史文档](docs/history/V1_README.md)
+**发布状态：源码已发布，本机运行；V2 Streamlit Cloud 部署验证中。** [V2 详细说明](v2/README.md) · [发布验证](v2/RELEASE_VALIDATION.md) · [在线部署评估](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md) · [V1 历史文档](docs/history/V1_README.md)
 
 ## 从资料到复习的产品闭环
 
@@ -37,42 +37,69 @@
 Streamlit 服务端通过 HTTP/SSE 调用 FastAPI；后端编排模型、检索和 MCP。浏览器会话负责展示，资料与小测由后端管理。
 
 ```mermaid
-flowchart TD
-    UI[Streamlit 产品界面] --> API[FastAPI HTTP / SSE]
-    API --> R[Router: daily / knowledge + requires_web]
-    R -->|daily| D{联网开启且需要实时信息?}
-    D -->|否| DA[日常回答]
-    D -->|是| Q[query_rewrite]
-    R -->|knowledge: 个人笔记| Q
-    Q --> B{route}
-    B -->|knowledge| V[向量检索 → BM25 → RRF → Cross Encoder]
-    B -->|daily| W[Tavily MCP web_search]
-    V --> E{联网开启?}
-    E -->|是| W
-    E -->|否| RA[rag_answer]
-    W --> T{route}
-    T -->|daily| DA
-    T -->|knowledge| RA
-    DA --> C[本轮来源校验 / 完成或失败]
-    RA --> C
-    C --> API
-    API --> QS[小测生成 → 批改 → 学习报告]
+flowchart LR
+    UI["Streamlit 产品界面"] <-->|HTTP / SSE| API["FastAPI"]
+    API --> CHAT["聊天接口 /chat/stream"]
+    API --> NOTES["知识库接口 /notes"]
+    API --> QUIZ["小测接口 /quiz"]
+    CHAT --> GRAPH["LangGraph 固定工作流"]
+    GRAPH --> TEXT["DeepSeek 文本模型"]
+    GRAPH --> RET["混合检索与精排"]
+    GRAPH --> WEB["Tavily 远程 MCP"]
+    RET --> DB[("Chroma 笔记集合")]
+    RET --> EMB["DashScope Embedding"]
+    RET --> CE["本地 Cross Encoder"]
+    NOTES --> IMPORT["Markdown / 图片 / ZIP 导入"]
+    IMPORT --> VISION["视觉接口"]
+    IMPORT --> EMB
+    IMPORT --> DB
+    QUIZ --> SERVICE["小测生成 / 批改 / 报告"]
+    SERVICE --> DB
+    SERVICE --> TEXT
+    SERVICE --> STORE[("进程内小测与报告")]
 ```
+
+### 聊天 Graph 的实际执行顺序
+
+```mermaid
+flowchart TD
+    START([START]) --> R["router"]
+    R -->|"daily 且无需或未允许联网"| D["daily"]
+    R -->|"knowledge 或 daily 需要且允许联网"| Q["query_rewrite"]
+    Q -->|"knowledge"| V["vector_retrieval"]
+    Q -->|"daily"| W["web_search"]
+    V --> B["bm25_retrieval"]
+    B --> F["rrf_fusion"]
+    F --> E["reranker"]
+    E -->|"web_enabled = false"| A["rag_answer"]
+    E -->|"web_enabled = true"| W
+    W -->|"daily"| D
+    W -->|"knowledge"| A
+    D --> END([END])
+    A --> END
+```
+
+来源校验在回答函数和 API 内完成，不是额外 Graph 节点。小测、批改与报告是独立服务路径，不属于聊天 Graph。
 
 关闭联网时任何分支都不搜索；开启时问候、情绪聊天等不强制搜索。Router 每轮清空旧检索与来源，避免切换开关或跨轮问答带入上轮资料。实时问题未联网、搜索失败或结果为空时，明确说明无法确认实时信息。Router 仍可能误判，可明确提问“根据我的笔记”。
 
 ## RAG 检索数据流
 
+这里画的是**数据依赖**：Graph 先执行向量节点，再执行 BM25 节点，但 BM25 不消费向量候选，两路分别检索同一个笔记集合。
+
 ```mermaid
 flowchart LR
-    A[问题 + 最近对话] --> B[查询改写]
-    B --> C[DashScope 向量检索]
-    C --> D[中文 BM25 检索]
-    D --> E[RRF 融合两路候选]
-    E --> F[Cross Encoder 精排]
-    F --> G[Top-K 原文片段]
-    G --> H[生成回答 + 来源校验]
-    W[可选网页补充] --> H
+    Q["改写后的问题"] --> V["向量检索"]
+    Q --> B["中文 BM25 检索"]
+    DB[("同一 Chroma 笔记集合")] --> V
+    DB --> B
+    V -->|"vector_results"| F["RRF 融合"]
+    B -->|"bm25_results"| F
+    F --> E["Cross Encoder 精排"]
+    Q --> E
+    E --> K["Top-K 原文片段"]
+    K --> A["生成回答 / 引用校验"]
+    W["可选网页结果"] --> A
 ```
 
 向量检索补充语义关联，BM25 保留术语匹配，RRF 合并候选排名，再由 `BAAI/bge-reranker-base` 精排选取片段。当前默认 Top-K 为 3；没有公开基准证明它优于其他参数，也没有宣称性能提升百分比。
@@ -139,6 +166,8 @@ python -m venv .venv
 也可双击根目录 `start_v2.bat`。前端为 `http://127.0.0.1:8501`，API 文档为 `http://127.0.0.1:8000/docs`；Ctrl+C 停止两个服务。
 
 必须安装 V2 requirements，根 requirements 仅服务原 V1 基础安装。torch 与精排模型较大，首次非空笔记问答可能下载模型；pkuseg 在部分 Windows 环境需要构建工具或兼容包。启动与健康检查不调用模型；提问、导入、搜索、小测、批改、报告及主动 Key 验证可能收费。更多安装限制见 [V2 运行说明](v2/README.md#windows-本机启动)。
+
+Cloud 专用入口及会话隔离说明见 [Streamlit 部署说明](v2/deploy/README.md)。本机单用户入口保持原运行方式。
 
 ## 在线 Demo 与版本入口
 
