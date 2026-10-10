@@ -19,8 +19,13 @@ class BM25Result(TypedDict):
 @lru_cache(maxsize=1)
 def get_segmenter():
     """首次关键词检索时创建中文分词器，后续复用，日常聊天无需初始化。"""
-    import pkuseg
-
+    try:
+        import pkuseg
+    except ModuleNotFoundError as error:
+        if error.name != "pkuseg":
+            raise
+        # Cloud 的 Python 3.12 wheel 使用维护中的同算法 fork；不跳过 BM25。
+        import spacy_pkuseg as pkuseg
     return pkuseg.pkuseg()
 
 

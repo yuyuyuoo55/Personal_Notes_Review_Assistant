@@ -148,6 +148,25 @@ class CloudTests(unittest.TestCase):
         for _ in range(90):self.sessions.acquire(self.a);self.sessions.release(self.a)
         with self.assertRaises(ApiError):self.sessions.acquire(self.a)
 
+    def test_cloud_pkuseg_fork_keeps_bm25_segmenter(self):
+        import builtins
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from app.rag.bm25_retrieval import get_segmenter
+        original_import = builtins.__import__
+        factory = Mock(return_value=SimpleNamespace(cut=lambda text:[text]))
+        def importer(name, *args, **kwargs):
+            if name == "pkuseg":
+                raise ModuleNotFoundError("pkuseg", name="pkuseg")
+            return original_import(name, *args, **kwargs)
+        get_segmenter.cache_clear()
+        try:
+            with patch('builtins.__import__',side_effect=importer),patch.dict(sys.modules,{'spacy_pkuseg':SimpleNamespace(pkuseg=factory)}):
+                self.assertEqual(get_segmenter().cut('中文'),['中文'])
+                factory.assert_called_once_with()
+        finally:
+            get_segmenter.cache_clear()
+
     def test_oversized_upload_rejected(self):
         reply=self.client.post('/notes/upload',headers={**self.headers(self.a),'Content-Length':str(6*1024*1024)},content=b'x')
         self.assertEqual(reply.status_code,413)

@@ -1,4 +1,9 @@
-# Cloud 独立入口使用完整 V2 依赖，不改 V1。CPU torch 避免 CUDA 包。
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.14.1+cpu
--r ../requirements.txt
+# Cloud Python 3.12/Linux；保留中文 BM25 与 Cross Encoder。
+# CPU wheel 直接来自 PyTorch，避免额外索引遮蔽 PyPI 的普通包。
+-r ../../requirements.txt
+-r ../requirements-mcp.txt
+langgraph>=1.2,<2
+# 维护中的 pkuseg fork 提供 cp312 Linux wheel，避免旧源码隔离构建失败。
+spacy-pkuseg==1.0.1
+sentence-transformers>=5.7,<6
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl
