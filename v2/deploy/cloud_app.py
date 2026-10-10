@@ -1,4 +1,4 @@
-"""Streamlit Community Cloud 专用入口；不读取本机或平台的供应商密钥。"""
+"""Streamlit Cloud 专用入口；百炼与 Tavily 来自平台 Secrets，DeepSeek 由访客配置。"""
 import runpy
 import sys
 from pathlib import Path
@@ -10,11 +10,18 @@ sys.path.insert(0, str(V2))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cloud_backend import start_backend
 from app.api.runtime import ApiError
+from app.api.cloud import CloudSessions
 
 
 @st.cache_resource(show_spinner=False)
 def backend():
-    return start_backend()
+    # 只从平台 Secrets 明确读取共享服务；不加载本机 .env 或 DeepSeek。
+    try:
+        defaults = {name:str(st.secrets.get(name, "")).strip()
+                    for name in ("DASHSCOPE_API_KEY", "TAVILY_API_KEY")}
+    except FileNotFoundError:
+        defaults = {"DASHSCOPE_API_KEY":"", "TAVILY_API_KEY":""}
+    return start_backend(CloudSessions(sponsor_keys=defaults))
 
 
 try:
@@ -34,21 +41,5 @@ except (ApiError, RuntimeError):
 # 复用现有页面布局、HTTP/SSE 客户端及所有真实业务。
 runpy.run_path(str(V2 / "frontend" / "app.py"), run_name="__main__")
 
-with st.expander("云端联网配置（可选）"):
-    st.caption("Tavily Key 只保存在当前服务端会话内存；保存不发请求，开启联网提问时才调用 Tavily MCP，可能收费。")
-    if st.session_state.pop("clear_cloud_tavily", False):
-        st.session_state["cloud_tavily_key"] = ""
-    with st.form("cloud_tavily"):
-        key = st.text_input("Tavily API Key", type="password", key="cloud_tavily_key", max_chars=512)
-        consent = st.checkbox("同意将此 Key 交给本演示服务，并在启用联网时用于 Tavily")
-        save = st.form_submit_button("保存或清除联网配置")
-    if save:
-        if not consent:
-            st.warning("请确认密钥用途；不填写 Key 可清除配置。")
-        else:
-            try:
-                sessions.set_tavily(st.session_state["_cloud_connection"]["token"], key.strip())
-                st.session_state["clear_cloud_tavily"] = True
-                st.rerun()
-            except ApiError as error:
-                st.warning(error.message)
+
+st.caption("百炼 Embedding 与 Tavily 联网由演示者提供；额度或服务异常会明确提示。")

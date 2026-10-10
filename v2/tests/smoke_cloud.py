@@ -49,6 +49,30 @@ class CloudTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch('requests.sessions.Session.request',side_effect=AssertionError('paid HTTP forbidden')).start()
 
+    def test_host_defaults_hidden_immutable_and_deepseek_isolated(self):
+        sessions = CloudSessions(runtime_factory=self.sessions.runtime_factory,
+            sponsor_keys={'DASHSCOPE_API_KEY':'mock-host-embedding-secret', 'TAVILY_API_KEY':'mock-host-search-secret'})
+        self.addCleanup(lambda: __import__('shutil').rmtree(sessions.root,ignore_errors=True))
+        a,b = sessions.register(),sessions.register()
+        app=create_app();app.add_middleware(CloudSessionGuard,sessions=sessions)
+        with TestClient(app,base_url='http://127.0.0.1',client=('127.0.0.1',4000)) as client:
+            for token in (a,b):
+                keys=sessions.rows[token]['runtime'].keys
+                self.assertEqual(keys.effective('dashscope'),'mock-host-embedding-secret')
+                self.assertEqual(keys.effective('deepseek'),'')
+                reply=client.get('/settings/providers',headers=self.headers(token))
+                self.assertNotIn('mock-host',reply.text)
+                self.assertEqual(reply.json()['data']['dashscope']['masked_key'],'')
+                for method,payload in [('PUT',{'api_key':'visitor-key','paid_validation_consent':True,'max_requests':1}),('DELETE',{'confirm':True})]:
+                    self.assertEqual(client.request(method,'/settings/providers/dashscope',headers=self.headers(token),json=payload).status_code,403)
+            with patch('app.api.cloud.search_web',AsyncMock(return_value=[])) as search:
+                asyncio.run(sessions.rows[a]['runtime'].web_search('最新新闻'))
+                search.assert_awaited_once_with('最新新闻',api_key='mock-host-search-secret')
+            with self.assertRaises(ApiError):sessions.set_tavily(a,'visitor-search')
+            reply=client.put('/settings/providers/deepseek',headers=self.headers(a),json={'api_key':'offline-owned-key','paid_validation_consent':True,'max_requests':1})
+            self.assertEqual(reply.status_code,200)
+            self.assertEqual(sessions.rows[b]['runtime'].keys.effective('deepseek'),'')
+
     def headers(self, token):
         return {"X-V2-Session-Token":token,"X-V2-Settings-Token":token}
 

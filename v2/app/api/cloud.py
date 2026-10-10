@@ -1,4 +1,4 @@
-"""Streamlit 云端临时演示：内部 HTTP、独立会话和 BYOK，不回退服务器密钥。"""
+"""Streamlit 云端临时演示：独立资料与 DeepSeek，会话可使用明确配置的演示者服务。"""
 import secrets
 import shutil
 import tempfile
@@ -30,13 +30,32 @@ class MemoryCredentials:
         self.rows.pop(name, None)
 
 
+class CloudKeys(KeyManager):
+    """演示者提供百炼；访客只管理自己的 DeepSeek，状态不暴露共享密钥。"""
+    def __init__(self, storage, defaults):
+        super().__init__(storage, environment={}, storage_source="session_memory")
+        self.defaults = defaults
+
+    def effective(self, provider):
+        if provider == "dashscope":
+            return self.defaults.get("DASHSCOPE_API_KEY", "")
+        return super().effective(provider)
+
+    def status(self, provider):
+        if provider == "dashscope":
+            return {"provider":provider, "configured":bool(self.effective(provider)),
+                    "source":"demo_host", "masked_key":"", "validation_state":"not_verified",
+                    "capabilities":[], "validated_at":None}
+        return super().status(provider)
+
+
 class CloudSessions:
     """【业务需求】匿名浏览器之间不共享密钥、文件、知识库或小测。
     【输入】会话容量、过期时间及可注入离线 Runtime 工厂。
     【执行步骤】随机 token 建立独立运行时；请求续期；闲置且无请求时清理。
     【输出】只允许已注册 token 获取自己的 Runtime。
     """
-    def __init__(self, *, max_sessions=8, ttl=1800, runtime_factory=None, clock=time.monotonic):
+    def __init__(self, *, max_sessions=8, ttl=1800, runtime_factory=None, clock=time.monotonic, sponsor_keys=None):
         self.root = Path(tempfile.mkdtemp(prefix="v2-cloud-")).resolve()
         self.max_sessions, self.ttl = max_sessions, ttl
         self.runtime_factory, self.clock = runtime_factory, clock
@@ -45,6 +64,7 @@ class CloudSessions:
         # 单进程共享重精排模型；同时只做一个业务任务，限制演示资源峰值。
         self.job_lock = Lock()
         self.chroma_client = None
+        self.sponsor_keys = sponsor_keys
 
     def register(self):
         with self.lock:
@@ -55,9 +75,12 @@ class CloudSessions:
             session_id = secrets.token_hex(16)
             credentials = MemoryCredentials()
             keys = KeyManager(credentials, environment={}, storage_source="session_memory")
+            if self.sponsor_keys is not None:
+                keys = CloudKeys(credentials, self.sponsor_keys)
             runtime = (self.runtime_factory(keys, token) if self.runtime_factory else
                        Runtime(keys=keys, settings_token=token))
             runtime.cloud_demo = True
+            runtime.cloud_sponsored = self.sponsor_keys is not None
             runtime.job_lock = self.job_lock
             runtime.upload_root = self.root / "uploads" / session_id
             collection = "session_" + session_id
@@ -65,13 +88,15 @@ class CloudSessions:
                 def store_factory():
                     key = keys.effective("dashscope")
                     if not key:
-                        raise ApiError(422, "not_configured", "请先在设置中配置当前会话的百炼 Key。")
-                    # 共享临时数据库连接，集合按会话隔离；没有服务端 Key 回退。
+                        raise ApiError(422, "not_configured", "演示者尚未配置百炼服务，请联系演示者。" if runtime.cloud_sponsored else "请先在设置中配置当前会话的百炼 Key。")
+                    # 共享临时数据库连接，集合按会话隔离；只使用明确注入的百炼配置。
                     import chromadb
                     self.chroma_client = chromadb.PersistentClient(path=str(self.root / "chroma"))
                     return create_vector_store(self.root / "chroma", api_key=key, collection_name=collection)
                 runtime.store_factory = store_factory
             async def session_search(query):
+                if self.sponsor_keys is not None:
+                    return await search_web(query, api_key=self.sponsor_keys.get("TAVILY_API_KEY", ""))
                 return await search_web(query, api_key=credentials.read("tavily").secret if credentials.read("tavily") else "")
             runtime.web_search = session_search
             self.rows[token] = {"runtime":runtime, "credentials":credentials, "collection":collection,
@@ -106,6 +131,8 @@ class CloudSessions:
 
     def set_tavily(self, token, key):
         with self.lock:
+            if self.sponsor_keys is not None:
+                raise ApiError(403, "host_managed", "联网服务由演示者管理。")
             if not self.valid(token):
                 raise ApiError(401, "session_expired", "演示会话已失效。")
             if self.job_lock.locked():
@@ -157,6 +184,10 @@ class CloudSessionGuard:
                 raise ApiError(403, "internal_only", "仅允许内部服务请求。")
             runtime = self.sessions.acquire(token)
             acquired = True
+            if (getattr(runtime, "cloud_sponsored", False)
+                and scope.get("path") == "/settings/providers/dashscope"
+                and scope.get("method") in {"PUT", "DELETE"}):
+                raise ApiError(403, "host_managed", "百炼服务由演示者管理，访客不能修改。")
             scope.setdefault("state", {})["runtime"] = runtime
             if scope.get("path") == "/notes/upload":
                 # 演示端单次请求最多 5 MiB，每个会话上传目录最多 20 MiB。

@@ -11,7 +11,7 @@
 - Main file path：`v2/deploy/cloud_app.py`
 - Python：`3.12`
 - 依赖：入口同目录 `requirements.txt`，包含 V2 工作流依赖；CPU torch，不去掉 BM25 或精排。Cloud 中文分词使用维护中的 `spacy-pkuseg` fork（默认 OntoNotes 模型），本机入口继续使用原 pkuseg。
-- 不填写平台供应商 Secret；访客在设置页使用自己的 DeepSeek/百炼 Key。Tavily 在页面底部的“云端联网配置”单独配置。
+- 平台 Secrets 配置演示者的 `DASHSCOPE_API_KEY` 与 `TAVILY_API_KEY`；不配置共享 DeepSeek Key。访客只能在设置页配置自己的 DeepSeek。共享 Key 不向页面返回，百炼写入/删除接口禁止访客使用。
 
 Cloud 从仓库根目录执行 Streamlit，优先搜索入口同目录依赖，见 [文件组织](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/file-organization) 和 [依赖规则](https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies)。
 
@@ -30,11 +30,11 @@ flowchart LR
 
 ## 访客使用与隐私边界
 
-1. 设置页输入本人 DeepSeek / 百炼 Key，勾选一次验证及可能费用，主动点击验证；未配置时不会自动调用供应商。
-2. 在知识库导入非敏感示例，提问、小测、批改和报告保持原真实业务；使用 Key 所属账户额度，未承诺免费模型。
-3. 需要联网时另配置本人 Tavily Key；空 Key 不使用平台或环境的搜索密钥。保存 Tavily 不发请求，联网提问才搜索。
+1. 设置页只需输入本人 DeepSeek Key，勾选一次验证及可能费用，主动点击验证；未配置时不会自动调用供应商。
+2. 在知识库导入非敏感示例，提问、小测、批改和报告保持原真实业务；DeepSeek 使用访客账户额度，百炼使用演示者额度，未承诺免费模型。
+3. 联网默认关闭；开启后按需使用演示者的 Tavily Key。百炼与 Tavily 仅从平台 Secrets 明确读取，不使用本机 .env；未配置或额度耗尽时明确返回失败。免费额度不是应用自动保证，演示者应在供应商账户设置费用与额度限制。
 
-各会话密钥仅在服务器内存中，资料、小测、报告不跨浏览器共享。输入的 Key 会发送到演示服务及相应供应商，不能保证刷新后的会话保留。闲置 30 分钟后清理；休眠/重启可能清空所有演示数据。没有永久备份、用户登录或生产多租户承诺。关闭浏览器不会立即通知服务器，清理由闲置超时完成。
+访客 DeepSeek 密钥仅在服务器会话内存中；演示者的百炼与 Tavily Key 保存在平台 Secrets，资料、小测、报告不跨浏览器共享。输入的 Key 会发送到演示服务及相应供应商，不能保证刷新后的会话保留。闲置 30 分钟后清理；休眠/重启可能清空所有演示数据。没有永久备份、用户登录或生产多租户承诺。关闭浏览器不会立即通知服务器，清理由闲置超时完成。
 
 演示限制：最多 8 个活跃会话；每会话最多 90 个 HTTP 请求/分钟；全局一次只执行一个业务任务；单次上传请求最多 5 MiB，上传目录累计 20 MiB（图文 ZIP 展开受既有导入安全上限约束，展开文件可能使下一次上传达到累计上限）。精排完整保留，但首次模型下载、内存峰值、免费 Cloud 休眠可能导致慢启动或失败，不能把健康页成功当成全链路验收。
 
@@ -44,7 +44,7 @@ flowchart LR
 
 ## 本次验证
 
-- 完整离线回归：167 项，165 通过、2 Windows 符号链接权限跳过，无失败；新增 15 项 Cloud 检查。
+- 完整离线回归：168 项，166 通过、2 Windows 符号链接权限跳过，无失败；新增 16 项 Cloud 检查。
 - Cloud 检查：未知 token、跨会话密钥/同名文件/笔记/小测隔离、禁用环境 Key 回退、Tavily 显式 Key、设置删除、过期清理、限流、上传限制、done/error，以及真实内部 HTTP 的首个 Token 在 Fake 模型完成前抵达。
 - 原正式前端 30 项 Fake/Mock 浏览器联调全部通过，无浏览器异常。
 - Streamlit AppTest：入口加载无异常，Cloud health 已连接；未填 Key、未调用模型。

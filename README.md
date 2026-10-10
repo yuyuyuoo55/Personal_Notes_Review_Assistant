@@ -6,7 +6,7 @@
 
 **发布状态：V2 已部署至 Streamlit Cloud。** [打开 V2 演示](https://personal-notes-review-v2.streamlit.app/) · [V2 详细说明](v2/README.md) · [发布验证](v2/RELEASE_VALIDATION.md) · [在线部署评估](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md) · [V1 历史文档](docs/history/V1_README.md)
 
-访客无需登录即可打开页面；AI 交互需在设置页配置自己的 DeepSeek / 百炼 Key，联网另需 Tavily Key。云端资料临时保存。已验证云端构建、首页连接与设置页，尚未进行真实模型全链路验收。
+访客无需登录即可打开页面；AI 交互只需在设置页配置自己的 DeepSeek Key；百炼 Embedding 与 Tavily 由演示者提供。云端资料临时保存。已验证云端构建、首页连接与设置页，尚未进行真实模型全链路验收。
 
 ## 从资料到复习的产品闭环
 
@@ -148,7 +148,7 @@ V2 与 V1 业务独立，便于保留历史演进和评测。本机入口采用�
 | 浏览器联调 | 30 项通过，Fake Model / Mock HTTP / 临时 Chroma | 实际前后端页面及协议联通 |
 | Graph 场景脚本 | offline、acceptance、web-switch、note-import 均退出 0 | 指定场景路径通过 |
 
-Cloud 适配后的最新离线回归：**167 项，165 通过、2 Windows 权限跳过，无失败**；新增 15 项会话隔离、限流、清理与 HTTP/SSE 检查。原 30 项 Fake/Mock 浏览器联调通过。Streamlit Cloud Python 3.12 实际依赖安装成功，独立未登录浏览器可打开首页，设置页显示未配置凭据。
+Cloud 适配后的最新离线回归：**168 项，166 通过、2 Windows 权限跳过，无失败**；新增 16 项会话隔离、限流、清理与 HTTP/SSE 检查。原 30 项 Fake/Mock 浏览器联调通过。Streamlit Cloud Python 3.12 实际依赖安装成功，独立未登录浏览器可打开首页，设置页显示未配置凭据。
 
 本次真实付费 API 请求为 0。Fake/Mock 不代表真实 Router 分类、答案准确率、网页时效、视觉识别或学习效果；Cloud 启动成功也不等于精排模型内存或真实 AI 全链路已验收。详细记录与离线命令见 [发布验证](v2/RELEASE_VALIDATION.md)、[Cloud 部署说明](v2/deploy/README.md) 和 [V2 README](v2/README.md#离线回归)。原 V1 的历史评测留在独立文档，不作为 V2 指标。
 
@@ -175,7 +175,7 @@ Cloud 专用入口及会话隔离说明见 [Streamlit 部署说明](v2/deploy/RE
 
 ## 在线 Demo 与版本入口
 
-- **V2 在线演示：** [personal-notes-review-v2.streamlit.app](https://personal-notes-review-v2.streamlit.app/)。无需登录浏览页面，真实 AI 交互使用访客自己的 Key；闲置 30 分钟后清理，休眠或重启可能清空资料。配置与限制见 [Cloud 部署说明](v2/deploy/README.md)。[原只读部署方案报告](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md)保留方案比较。
+- **V2 在线演示：** [personal-notes-review-v2.streamlit.app](https://personal-notes-review-v2.streamlit.app/)。无需登录浏览页面，真实 AI 交互只需访客自己的 DeepSeek Key，百炼与 Tavily 由演示者提供；闲置 30 分钟后清理，休眠或重启可能清空资料。配置与限制见 [Cloud 部署说明](v2/deploy/README.md)。[原只读部署方案报告](docs/deployment/V2_ONLINE_DEPLOYMENT_ASSESSMENT.md)保留方案比较。
 - **V1 历史 Demo：** [Streamlit Cloud 地址](https://personalnotesreviewassistant-gcnvafbhbw8eqz5app2zqna.streamlit.app/)。本次未验证恢复状态，不能保证当前可用；它不代表 V2 功能。
 - [V1 原 README 与历史评测说明](docs/history/V1_README.md)；保留 `backend/`、`streamlit_demo.py` 及原评测文件。
 

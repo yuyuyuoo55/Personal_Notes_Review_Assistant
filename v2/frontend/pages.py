@@ -449,6 +449,10 @@ def settings_page():
             st.subheader(label)
             st.caption(use)
             current=statuses[provider]
+            if cloud and provider == "dashscope" and health.get("cloud_sponsored"):
+                st.info("由演示者提供，无需填写 Key。" if current["configured"] else "演示者尚未配置此服务。")
+                st.caption("仅用于笔记向量生成与检索；额度耗尽或服务失败时将提示错误。")
+                continue
             if current["configured"]:
                 if current["validation_state"]=="verified":
                     status_text="已配置 · 服务端验证成功 · "+current["masked_key"]
@@ -518,7 +522,7 @@ def settings_page():
         st.write("文本模型："+health.get("text_model","未知"))
         st.write("视觉模型："+health.get("vision_model","未知"))
         st.caption("DeepSeek 文本验证不代表视觉权限已验收。Embedding 固定为 DashScope，不重建已有知识库。")
-        st.caption("云端 Key 仅保留在服务器的当前会话内存中，不写普通文件；页面密码输入会发送到该演示服务及对应供应商。闲置或重启后清除，无服务器 Key 回退。" if cloud else "仅可信本机单用户。密钥保存在 Windows 系统凭据，不进入浏览器存储、Chroma、普通 JSON 或日志。")
+        st.caption("你的 DeepSeek Key 仅保留在当前服务器会话内存，发送到演示服务及 DeepSeek；闲置或重启后清除，不使用演示者的 DeepSeek Key。百炼与联网由演示者提供。" if health.get("cloud_sponsored") else "云端 Key 仅保留在服务器的当前会话内存中，不写普通文件；页面密码输入会发送到该演示服务及对应供应商。闲置或重启后清除，无服务器 Key 回退。" if cloud else "仅可信本机单用户。密钥保存在 Windows 系统凭据，不进入浏览器存储、Chroma、普通 JSON 或日志。")
 
 
 def render_balance(configured):

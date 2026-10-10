@@ -72,7 +72,8 @@ def create_app(runtime=None):
             'vision_model':'Fake Vision' if runtime.test_mode else os.getenv('DEEPSEEK_VISION_MODEL','deepseek-flash'),
             'embedding_model':'Mock Embedding' if runtime.test_mode else 'text-embedding-v4',
             'settings_enabled':bool(runtime.settings_token and runtime.keys.storage),
-            'cloud_demo':bool(getattr(runtime,'cloud_demo',False))}}
+            'cloud_demo':bool(getattr(runtime,'cloud_demo',False)),
+            'cloud_sponsored':bool(getattr(runtime,'cloud_sponsored',False))}}
 
     app.include_router(notes.router)
     app.include_router(chat.router)
