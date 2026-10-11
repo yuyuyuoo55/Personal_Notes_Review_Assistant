@@ -11,8 +11,8 @@ from starlette.responses import JSONResponse
 
 from .credentials import CredentialRecord, KeyManager
 from .runtime import Runtime, ApiError
-from ..rag.vector_retrieval import create_vector_store
 from ..integrations.tavily_mcp import search_web
+from .cloud_example import CloudEmbedding, load_example
 
 
 class MemoryCredentials:
@@ -55,7 +55,7 @@ class CloudSessions:
     【执行步骤】随机 token 建立独立运行时；请求续期；闲置且无请求时清理。
     【输出】只允许已注册 token 获取自己的 Runtime。
     """
-    def __init__(self, *, max_sessions=8, ttl=1800, runtime_factory=None, clock=time.monotonic, sponsor_keys=None):
+    def __init__(self, *, max_sessions=8, ttl=1800, runtime_factory=None, clock=time.monotonic, sponsor_keys=None, seed_example=True):
         self.root = Path(tempfile.mkdtemp(prefix="v2-cloud-")).resolve()
         self.max_sessions, self.ttl = max_sessions, ttl
         self.runtime_factory, self.clock = runtime_factory, clock
@@ -65,6 +65,7 @@ class CloudSessions:
         self.job_lock = Lock()
         self.chroma_client = None
         self.sponsor_keys = sponsor_keys
+        self.seed_example = seed_example
 
     def register(self):
         with self.lock:
@@ -86,14 +87,23 @@ class CloudSessions:
             collection = "session_" + session_id
             if self.runtime_factory is None:
                 def store_factory():
-                    key = keys.effective("dashscope")
-                    if not key:
-                        raise ApiError(422, "not_configured", "演示者尚未配置百炼服务，请联系演示者。" if runtime.cloud_sponsored else "请先在设置中配置当前会话的百炼 Key。")
                     # 共享临时数据库连接，集合按会话隔离；只使用明确注入的百炼配置。
                     import chromadb
+                    from langchain_chroma import Chroma
                     self.chroma_client = chromadb.PersistentClient(path=str(self.root / "chroma"))
-                    return create_vector_store(self.root / "chroma", api_key=key, collection_name=collection)
+                    return Chroma(collection_name=collection, persist_directory=str(self.root / "chroma"),
+                                  embedding_function=CloudEmbedding(keys))
                 runtime.store_factory = store_factory
+            if self.seed_example:
+                try:
+                    load_example(runtime)
+                except Exception:
+                    # 失败不注册半成品会话，更不自动请求供应商重建示例向量。
+                    if self.chroma_client is not None:
+                        names = {c.name if hasattr(c, "name") else c for c in self.chroma_client.list_collections()}
+                        if collection in names:
+                            self.chroma_client.delete_collection(collection)
+                    raise ApiError(503, "example_unavailable", "公开示例加载失败，未调用模型，请联系演示者。") from None
             async def session_search(query):
                 if self.sponsor_keys is not None:
                     return await search_web(query, api_key=self.sponsor_keys.get("TAVILY_API_KEY", ""))

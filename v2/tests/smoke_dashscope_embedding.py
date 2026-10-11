@@ -1,5 +1,6 @@
 """单一 DashScope、密钥生命周期及现有向量库的离线验证。"""
 import math
+import os
 import sys
 import tempfile
 import unittest
@@ -59,17 +60,36 @@ class DashScopeTests(unittest.TestCase):
         manager.environment.clear()
         self.assertFalse(manager.status('dashscope')['configured'])
 
-    def test_runtime_and_standalone_share_saved_key_and_cache_invalidation(self):
+    def test_runtime_and_standalone_key_update_and_cache_invalidation(self):
         manager=self.manager()
         manager.save('dashscope','offline-saved-key')
         runtime=Runtime(keys=manager)
         with patch('app.api.runtime.create_vector_store',side_effect=lambda **kw: object()) as factory:
             first=runtime.store()
             self.assertEqual(factory.call_args.kwargs['api_key'],'offline-saved-key')
+            self.assertIs(runtime.store(),first)
+            self.assertEqual(factory.call_count,1)
             manager.save('dashscope','offline-changed-key')
             runtime.invalidate_embedding('dashscope')
             self.assertIsNot(runtime.store(),first)
             self.assertEqual(factory.call_args.kwargs['api_key'],'offline-changed-key')
+            self.assertEqual(factory.call_count,2)
+        # 独立入口在所有平台均通过 KeyManager 解析密钥；注入真实内存管理器。
+        with patch('app.api.credentials.KeyManager',return_value=manager) as manager_factory, \
+                patch('app.api.credentials.WindowsCredentials',return_value=manager.storage) as storage_factory, \
+                patch('app.rag.vector_retrieval.DashScopeEmbeddings') as embedding, \
+                patch('app.rag.vector_retrieval.Chroma'):
+            create_vector_store()
+            self.assertEqual(embedding.call_args.kwargs['dashscope_api_key'],'offline-changed-key')
+            manager_factory.assert_called_once_with(manager.storage if os.name=='nt' else None)
+            self.assertEqual(storage_factory.call_count,1 if os.name=='nt' else 0)
+
+    @unittest.skipUnless(os.name=='nt','Windows only: standalone Windows credential sharing')
+    def test_windows_standalone_shares_saved_credentials(self):
+        manager=self.manager()
+        manager.save('dashscope','offline-saved-key')
+        manager.save('dashscope','offline-changed-key')
+        # 保留真实 KeyManager，只替换系统存储，核对 Windows 专属共享路径。
         with patch('app.api.credentials.WindowsCredentials',return_value=manager.storage), \
                 patch('app.rag.vector_retrieval.DashScopeEmbeddings') as embedding, \
                 patch('app.rag.vector_retrieval.Chroma'):
@@ -100,6 +120,7 @@ class DashScopeTests(unittest.TestCase):
                 manager.effective('unsupported-provider')
             read.assert_not_called()
 
+    @unittest.skipUnless(os.name=='nt','Windows only: native credential persistence')
     def test_windows_restart_persistence_dummy_credentials_only(self):
         prefix='PersonalNotesReviewAssistant/Test/'+uuid4().hex
         storage=WindowsCredentials(prefix)

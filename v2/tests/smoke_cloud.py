@@ -39,7 +39,7 @@ class CloudTests(unittest.TestCase):
                 persist_directory=str(Path(self.temp.name)/"chroma"), embedding_function=OfflineEmbedding())
             return Runtime(keys=keys, settings_token=token, store_factory=lambda:store,
                            model_factory=lambda:self.model)
-        self.sessions = CloudSessions(runtime_factory=factory,clock=lambda:self.now)
+        self.sessions = CloudSessions(runtime_factory=factory,clock=lambda:self.now,seed_example=False)
         self.addCleanup(lambda: __import__('shutil').rmtree(self.sessions.root,ignore_errors=True))
         self.a, self.b = self.sessions.register(), self.sessions.register()
         app = create_app()
@@ -50,7 +50,7 @@ class CloudTests(unittest.TestCase):
         patch('requests.sessions.Session.request',side_effect=AssertionError('paid HTTP forbidden')).start()
 
     def test_host_defaults_hidden_immutable_and_deepseek_isolated(self):
-        sessions = CloudSessions(runtime_factory=self.sessions.runtime_factory,
+        sessions = CloudSessions(runtime_factory=self.sessions.runtime_factory,seed_example=False,
             sponsor_keys={'DASHSCOPE_API_KEY':'mock-host-embedding-secret', 'TAVILY_API_KEY':'mock-host-search-secret'})
         self.addCleanup(lambda: __import__('shutil').rmtree(sessions.root,ignore_errors=True))
         a,b = sessions.register(),sessions.register()

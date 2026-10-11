@@ -12,6 +12,7 @@ from ..rag.rag_answer import cited_answer_sources
 from .runtime import ApiError, DeferredGraphStore, run_job, runtime_from
 from .schemas import ChatRequest
 from .streaming import StreamingAnswerModel
+from .source_images import public_sources
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -67,7 +68,7 @@ async def chat_events(request, runtime, payload):
                             sources = cited_answer_sources(update.get("answer_sources", []),answer)
             if answer is None:
                 raise ValueError("工作流未生成最终回答。")
-            yield event("sources", {"items": sources})
+            yield event("sources", {"items": public_sources(sources, cloud=getattr(runtime, "cloud_demo", False))})
             yield event("done", {"status": "completed", "answer": answer, "route": route})
     except asyncio.CancelledError:
         raise

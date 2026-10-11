@@ -1,6 +1,7 @@
 """Streamlit 服务端 HTTP 客户端及 SSE 协议解析。"""
 import json
 import os
+import re
 from urllib.parse import urlsplit
 
 import httpx
@@ -52,6 +53,28 @@ class ApiClient:
         if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.username:
             raise ValueError("本版本仅连接本机 HTTP 服务。")
         self.settings_token = (connection.get("token") or os.getenv("V2_SETTINGS_TOKEN", "")) if settings_token is None else settings_token
+
+    def source_image(self, chunk_id):
+        """只向固定内部接口提交 Chunk ID，携带当前会话 token，不跟随跳转。"""
+        if not isinstance(chunk_id, str) or not re.fullmatch(r"[a-f0-9]{64}", chunk_id):
+            raise BackendError("来源图片标识无效。")
+        try:
+            with httpx.Client(base_url=self.base_url, timeout=30, trust_env=False, follow_redirects=False) as client:
+                with client.stream("GET", "/notes/images/" + chunk_id,
+                                   headers={"X-V2-Session-Token": self.session_token} if self.session_token else {}) as reply:
+                    mime = reply.headers.get("content-type", "").split(";")[0]
+                    if reply.status_code != 200 or mime not in {"image/png", "image/jpeg", "image/webp"}:
+                        raise BackendError("来源原图不可读取，可能已删除或变更。")
+                    raw = bytearray()
+                    for part in reply.iter_bytes():
+                        raw.extend(part)
+                        if len(raw) > 10 * 1024 * 1024:
+                            raise BackendError("来源图片过大。")
+                    if not raw:
+                        raise BackendError("来源图片为空。")
+                    return bytes(raw), mime
+        except httpx.HTTPError:
+            raise BackendError("来源图片读取失败，未自动重试。") from None
 
     def request(self, method, path, **kwargs):
         headers = {"X-V2-Session-Token":self.session_token} if self.session_token else {}
