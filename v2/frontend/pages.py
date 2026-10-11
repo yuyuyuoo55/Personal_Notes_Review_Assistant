@@ -1,5 +1,6 @@
 """已确认的五类产品页面；只使用 HTTP 返回的公共数据。"""
 import html
+import base64
 from datetime import datetime
 from pathlib import PureWindowsPath
 
@@ -7,7 +8,7 @@ import streamlit as st
 
 from client import ApiClient, BackendError
 from report_view import render_study_report
-from presentation import visible_sources
+from presentation import visible_sources, answer_markdown
 
 
 def title(eyebrow, heading, description):
@@ -56,6 +57,15 @@ def show_sources(sources,answer):
             headings={key:metadata[key] for key in ("Header 1","Header 2","Header 3") if key in metadata}
             if headings:
                 st.caption(heading_label(headings))
+            if item.get("image_chunk_id") == item.get("id") and metadata.get("is_image_chunk") is True:
+                try:
+                    raw, mime = ApiClient().source_image(item["image_chunk_id"])
+                    # 内联原图，不使用跨会话共享的 Streamlit media URL，也不接受模型路径/HTML。
+                    encoded = base64.b64encode(raw).decode("ascii")
+                    st.markdown(f'<img src="data:{mime};base64,{encoded}" style="max-width:100%;max-height:480px" alt="引用来源原图">', unsafe_allow_html=True)
+                    st.caption("[" + reference + "] 引用来源原图")
+                except BackendError as error:
+                    st.caption(str(error))
             for value in (metadata.get("source") or item.get("source"), item.get("id") or item.get("chunk_id")):
                 if value:
                     st.caption(str(value))
@@ -100,7 +110,7 @@ def chat_page():
                         st.write("· "+example)
             for index,message in enumerate(history):
                 with chat_bubble(message["role"],index):
-                    st.markdown(message["content"])
+                    st.markdown(answer_markdown(message["content"]) if message["role"]=="assistant" else message["content"])
                     if message["role"]=="assistant":
                         message["sources"]=visible_sources(message.get("sources",[]),message["content"])
                         show_sources(message["sources"],message["content"])
@@ -137,14 +147,14 @@ def chat_page():
                             if not isinstance(text,str):
                                 raise BackendError("回答增量无效，本轮草稿未保存。")
                             draft += text
-                            draft_area.markdown(draft + " ▌")
+                            draft_area.markdown(answer_markdown(draft) + " ▌")
                         elif name=="sources":
                             sources = data.get("items",[])
                         elif name=="done":
                             done = data
                     if not done:
                         raise BackendError("未收到回答完成标记。")
-                    draft_area.markdown(done["answer"])
+                    draft_area.markdown(answer_markdown(done["answer"]))
                     state.caption("回答完成")
                     sources=visible_sources(sources,done["answer"])
                     show_sources(sources,done["answer"])
@@ -176,7 +186,7 @@ def show_import(result):
     metrics[2].metric("警告",len(result.get("warnings",[])))
     for warning in result.get("warnings",[]):
         st.warning(str(warning))
-    if result.get("stored_path"):
+    if result.get("stored_path") and not st.session_state.get("health", {}).get("cloud_demo"):
         st.caption("服务端来源：" + result["stored_path"])
 
 
@@ -234,7 +244,7 @@ def knowledge_page():
                 source=st.selectbox("选择笔记",list(mapping),format_func=lambda source:note_label(mapping[source]),key="knowledge_note")
                 note=mapping[source]
                 with st.expander("笔记来源"):
-                    st.caption(note["source"])
+                    st.caption(note["filename"] if st.session_state.get("health", {}).get("cloud_demo") else note["source"])
                 try:
                     chapters=ApiClient().request("GET","/notes/chapters",params={"source":note["source"]})["data"]
                     st.subheader("章节目录")

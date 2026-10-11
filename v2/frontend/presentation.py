@@ -2,6 +2,17 @@
 import re
 
 
+def answer_markdown(text):
+    """模型回答中的 Markdown 图片语法只显示为文字；原图只来自受控来源接口。"""
+    # 保留代码示例；其他位置转义 !，同时阻止内联、引用式和隐式引用图片。
+    parts = re.split(r"(`{3,}[^\n]*\n[\s\S]*?`{3,}|~{3,}[^\n]*\n[\s\S]*?~{3,}|`+[^`\n]*`+)", text)
+    def escape_image(match):
+        prefix = match[1]
+        return prefix + ("\\" if len(prefix) % 2 == 0 else "") + "!["
+    return "".join(part if index % 2 else re.sub(r"(\\*)!\[", escape_image, part)
+                   for index, part in enumerate(parts))
+
+
 def visible_sources(sources,answer):
     """【业务需求】旧会话候选也不能冒充本次有效引用。
     【输入】本条助手消息来源与回答正文。

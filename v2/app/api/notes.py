@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import Response
 
 from ..knowledge.image_import import import_image, import_markdown_images
 from ..knowledge.note_import import import_markdown
@@ -13,11 +14,20 @@ from ..knowledge.zip_import import import_zip, _zip_parts
 from ..quiz.chapter import list_notes, list_chapters
 from .runtime import ApiError, response, run_job, runtime_from
 from .schemas import Envelope
+from .source_images import source_image
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 LIMITS = {".md": 2*1024*1024, ".markdown": 2*1024*1024,
           ".png": 10*1024*1024, ".jpg": 10*1024*1024, ".jpeg": 10*1024*1024,
           ".webp": 10*1024*1024, ".zip": 100*1024*1024}
+
+
+@router.get("/images/{chunk_id}")
+async def image(request: Request, chunk_id: str):
+    runtime = runtime_from(request)
+    raw, mime = await run_job(runtime, source_image, runtime, chunk_id)
+    return Response(raw, media_type=mime, headers={"Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'"})
 
 
 def upload_name(name):
