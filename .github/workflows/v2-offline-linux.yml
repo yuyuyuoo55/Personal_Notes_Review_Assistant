@@ -1,0 +1,96 @@
+name: V2 Linux offline validation
+
+on:
+  push:
+    branches: [codex/v2-web-release]
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Cloud dependencies (download network allowed)
+        run: python -m pip install -r v2/deploy/requirements.txt
+      - name: Prepare explicit per-test evidence
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/v2-offline-runner.py" <<'PY'
+          import json
+          import os
+          import socket
+          import sys
+          import unittest
+          from pathlib import Path
+
+          # No routes/interfaces to the internet exist in the test namespace.
+          routes = Path('/proc/net/route').read_text()
+          interfaces = {name for _, name in socket.if_nameindex()}
+          if interfaces != {'lo'} or len(routes.strip().splitlines()) != 1:
+              raise RuntimeError('Network namespace isolation was not established')
+          for key in list(os.environ):
+              if any(part in key.upper() for part in ('KEY', 'TOKEN', 'SECRET', 'PROXY')):
+                  os.environ.pop(key, None)
+          os.environ['HF_HUB_OFFLINE'] = '1'
+          os.environ['TRANSFORMERS_OFFLINE'] = '1'
+          os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+          os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+          root = Path.cwd()
+          sys.path.insert(0, str(root / 'v2/tests'))
+          required = {
+              'smoke_api.ApiTests.test_upload_symlink_outside_root_rejected',
+              'smoke_image_import.ImageImportTests.test_symlink_escape_rejected',
+              'smoke_portfolio.PortfolioTests.test_image_symlink_escape_rejected',
+          }
+          outcomes = {}
+          class EvidenceResult(unittest.TextTestResult):
+              def addSuccess(self, test):
+                  outcomes[test.id()] = 'passed'
+                  super().addSuccess(test)
+              def addSkip(self, test, reason):
+                  outcomes[test.id()] = 'skipped'
+                  super().addSkip(test, reason)
+              def addFailure(self, test, err):
+                  outcomes[test.id()] = 'failed'
+                  super().addFailure(test, err)
+              def addError(self, test, err):
+                  outcomes[test.id()] = 'error'
+                  super().addError(test, err)
+          suite = unittest.defaultTestLoader.discover(str(root / 'v2/tests'), pattern='smoke_*.py')
+          result = unittest.TextTestRunner(verbosity=2, resultclass=EvidenceResult).run(suite)
+          summary = {
+              'tests': result.testsRun,
+              'passed': sum(v == 'passed' for v in outcomes.values()),
+              'failures': len(result.failures), 'errors': len(result.errors),
+              'skipped': len(result.skipped),
+              'critical_tests': {name: outcomes.get(name, 'not_executed') for name in sorted(required)},
+              'network': 'kernel network namespace: loopback only, no external routes',
+              'paid_network_requests': 0,
+          }
+          print('V2_OFFLINE_SUMMARY=' + json.dumps(summary, ensure_ascii=False), flush=True)
+          Path(os.environ['RUNNER_TEMP'], 'v2-offline-summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+          sys.exit(0 if result.wasSuccessful() and all(outcomes.get(name) == 'passed' for name in required) else 1)
+          PY
+      - name: Full offline suite in kernel-isolated network
+        shell: bash
+        run: |
+          set -o pipefail
+          PYTHON_BIN="$(command -v python)"
+          sudo --preserve-env=RUNNER_TEMP unshare --net bash -c 'ip link set lo up; exec "$1" -B "$2"' _ "$PYTHON_BIN" "$RUNNER_TEMP/v2-offline-runner.py" 2>&1 | tee "$RUNNER_TEMP/v2-offline-tests.log"
+      - name: Preserve offline evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-linux-offline-evidence
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/v2-offline-tests.log
+            ${{ runner.temp }}/v2-offline-summary.json
